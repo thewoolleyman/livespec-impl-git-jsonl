@@ -8,7 +8,7 @@
     {
       "name": "livespec-impl-plaintext",
       "source": "./.claude-plugin",
-      "description": "JSONL-backed implementation plugin for livespec-core Exposes /livespec-impl-plaintext:capture-impl-gaps, /livespec-impl-plaintext:capture-memo, /livespec-impl-plaintext:capture-spec-drift, /livespec-impl-plaintext:capture-work-item, /livespec-impl-plaintext:implement, /livespec-impl-plaintext:list-memos, /livespec-impl-plaintext:list-work-items, /livespec-impl-plaintext:next, /livespec-impl-plaintext:process-memos."
+      "description": "JSONL-backed implementation plugin for livespec-core. Exposes /livespec-impl-plaintext:capture-impl-gaps, capture-spec-drift, capture-work-item, capture-memo, implement, process-memos, list-memos, list-work-items, and next."
     }
   ]
 }
