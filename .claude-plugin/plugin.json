@@ -1,0 +1,5 @@
+{
+  "name": "livespec-impl-plaintext",
+  "version": "0.1.0",
+  "description": "JSONL-backed implementation plugin for livespec-core Exposes /livespec-impl-plaintext:capture-impl-gaps, /livespec-impl-plaintext:capture-memo, /livespec-impl-plaintext:capture-spec-drift, /livespec-impl-plaintext:capture-work-item, /livespec-impl-plaintext:implement, /livespec-impl-plaintext:list-memos, /livespec-impl-plaintext:list-work-items, /livespec-impl-plaintext:next, /livespec-impl-plaintext:process-memos."
+}

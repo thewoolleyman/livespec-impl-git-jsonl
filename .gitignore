@@ -1,0 +1,22 @@
+### Project ignores
+tmp/
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+.codex
+.idea/
+
+### Python toolchain artifacts
+__pycache__/
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+.ruff_cache/
+.pyright/
+.mutmut-cache/
+mutants/
+htmlcov/
+
+### UV local state
+.venv/
