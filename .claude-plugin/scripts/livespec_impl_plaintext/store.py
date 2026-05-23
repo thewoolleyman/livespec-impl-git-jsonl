@@ -19,6 +19,16 @@ The reader functions validate every record against the schema; a
 violation raises SchemaViolationError carrying the offending line
 number. A non-JSON line raises MalformedRecordLineError. Both are
 EXPECTED errors per the Result-vs-bugs split.
+
+Write-side parity (li-7zxnhw): `append_work_item` and `append_memo`
+validate their serialized payload against the SAME schema before
+writing. Defense in depth — a malformed dataclass (typically
+constructed by callers that bypass type checks with `# type: ignore`)
+that would slip through the writer is caught here. SchemaViolationError
+fires with `line_number=0`, a sentinel meaning "validation failed
+before the record reached disk — not yet a real line number". Without
+write-side validation, the typed-`depends_on`-union schema landed by
+parent epic li-6d2wpj cannot deliver its bulletproof guarantee.
 """
 
 import json
@@ -91,13 +101,29 @@ def read_memos(*, path: Path) -> Iterator[Memo]:
 
 
 def append_work_item(*, path: Path, item: WorkItem) -> None:
-    """Append a single WorkItem as a new line in the JSONL file."""
-    _append_record(path=path, payload=_work_item_to_dict(item=item))
+    """Append a single WorkItem as a new line in the JSONL file.
+
+    Validates the serialized payload against the read-path schema
+    before writing (li-7zxnhw); raises SchemaViolationError with
+    `line_number=0` (the pre-write sentinel) if the dataclass would
+    serialize to an invalid record.
+    """
+    payload = _work_item_to_dict(item=item)
+    _ = _parse_work_item(path=path, line_number=0, parsed=payload)
+    _append_record(path=path, payload=payload)
 
 
 def append_memo(*, path: Path, memo: Memo) -> None:
-    """Append a single Memo as a new line in the JSONL file."""
-    _append_record(path=path, payload=_memo_to_dict(memo=memo))
+    """Append a single Memo as a new line in the JSONL file.
+
+    Validates the serialized payload against the read-path schema
+    before writing (li-7zxnhw); raises SchemaViolationError with
+    `line_number=0` (the pre-write sentinel) if the dataclass would
+    serialize to an invalid record.
+    """
+    payload = _memo_to_dict(memo=memo)
+    _ = _parse_memo(path=path, line_number=0, parsed=payload)
+    _append_record(path=path, payload=payload)
 
 
 def materialize_work_items(records: Iterator[WorkItem]) -> dict[str, WorkItem]:

@@ -312,3 +312,50 @@ def test_append_creates_parent_directory(tmp_path: Path) -> None:
     append_work_item(path=path, item=item)
     assert path.exists()
     assert path.parent.is_dir()
+
+
+def test_append_work_item_rejects_invalid_enum(tmp_path: Path) -> None:
+    """Defense-in-depth (li-7zxnhw): bypass-typed enum on type field is caught before write."""
+    path = tmp_path / "work-items.jsonl"
+    bogus = WorkItem(
+        id="li-aaa111",
+        type="not-a-real-type",  # type: ignore[arg-type]
+        status="open",
+        title="t",
+        description="d",
+        origin="freeform",
+        gap_id=None,
+        priority=2,
+        assignee=None,
+        depends_on=(),
+        captured_at="2026-05-19T00:00:00Z",
+        resolution=None,
+        reason=None,
+        audit=None,
+        superseded_by=None,
+    )
+    with pytest.raises(SchemaViolationError) as excinfo:
+        append_work_item(path=path, item=bogus)
+    assert "type" in excinfo.value.detail
+    assert excinfo.value.line_number == 0
+    assert not path.exists()
+
+
+def test_append_memo_rejects_invalid_enum(tmp_path: Path) -> None:
+    """Defense-in-depth (li-7zxnhw): bypass-typed enum on state field is caught before write."""
+    path = tmp_path / "memos.jsonl"
+    bogus = Memo(
+        id="mm-aaa111",
+        text="some observation",
+        state="not-a-real-state",  # type: ignore[arg-type]
+        disposition=None,
+        captured_at="2026-05-19T00:00:00Z",
+        work_item_id=None,
+        knowledge_file=None,
+        propose_change_topic=None,
+    )
+    with pytest.raises(SchemaViolationError) as excinfo:
+        append_memo(path=path, memo=bogus)
+    assert "state" in excinfo.value.detail
+    assert excinfo.value.line_number == 0
+    assert not path.exists()
