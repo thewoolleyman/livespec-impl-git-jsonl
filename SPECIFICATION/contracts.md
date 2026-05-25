@@ -278,7 +278,7 @@ violations fire as doctor `fail` findings):
 - `priority` — integer 0–4 (0 = critical, 4 = backlog), matching
   upstream `bd` priority semantics.
 - `assignee` — string or `null`. Optional ownership marker.
-- `depends_on` — array of `id` strings. May be empty.
+- `depends_on` — array of `id` strings. MAY be empty.
 - `captured_at` — ISO-8601 UTC timestamp of the record's
   authorship.
 - `resolution` — string or `null`. REQUIRED non-null when
