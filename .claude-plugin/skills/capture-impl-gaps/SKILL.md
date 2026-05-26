@@ -53,6 +53,41 @@ by `gap_id` to produce a candidate list of
 form is the authoritative set; the rich form is convenience metadata
 for human display.
 
+#### Optional `--since-version <vN>` scoping
+
+`capture-impl-gaps` accepts an optional `--since-version <vN>` flag
+and passes it through verbatim to BOTH `detect-impl-gaps` invocations
+above. When set, gap detection is restricted to spec files whose
+content differs between historical version `<vN>` and the live spec.
+
+```bash
+# Scoped to changes introduced since v082:
+uv run python3 .claude-plugin/scripts/bin/detect_impl_gaps.py --json --since-version v082
+uv run python3 .claude-plugin/scripts/bin/detect_impl_gaps.py --since-version v082
+```
+
+The flag is the user-facing surface that callers (notably
+`/livespec:revise`'s post-step per the parent coordinating epic,
+livespec PC `revise-post-step-capture-impl-gaps`) use to scope
+per-revise gap detection to the diff that revise just introduced.
+Direct user invocations MAY use it for any "show me gaps for changes
+since this version" workflow.
+
+Validation is delegated to `detect-impl-gaps`. If the value is
+invalid:
+
+- Non-integer / non-positive input → `detect-impl-gaps` exits `2`
+  with a usage error.
+- Missing version directory (`<spec-root>/history/v<padded-N>/`
+  does not exist) → `detect-impl-gaps` exits `3` with a
+  `SpecVersionNotFoundError` message.
+
+In either case, `capture-impl-gaps` surfaces the error to the user
+and aborts before reaching Step 2; no work-items are filed.
+
+When `--since-version` is omitted, behavior is unchanged — every
+file in the live spec is scanned.
+
 ### Step 2 — Per-rule gap classification
 
 For each candidate, ask the user:

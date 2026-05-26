@@ -284,3 +284,257 @@ def test_detect_rules_returns_sorted_by_file_heading_text(tmp_path: Path) -> Non
     rules = detect_rules(spec_root=spec)
     spec_files = [r.spec_file for r in rules]
     assert spec_files == sorted(spec_files)
+
+
+# ---------------------------------------------------------------
+# --since-version flag tests
+# ---------------------------------------------------------------
+
+
+def _write_history_version(*, spec_root: Path, version: int, files: dict[str, str]) -> None:
+    """Populate <spec_root>/history/v<NNN>/ with the given files."""
+    version_dir = spec_root / "history" / f"v{version:03d}"
+    version_dir.mkdir(parents=True, exist_ok=True)
+    for name, content in files.items():
+        target = version_dir / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+
+
+def test_since_version_filters_to_diff_against_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--since-version v080 filters detection to spec diff v080→latest."""
+    monkeypatch.chdir(tmp_path)
+    spec = tmp_path / "SPECIFICATION"
+    spec.mkdir()
+    # v080 baseline: two files, both with one rule each.
+    _write_history_version(
+        spec_root=spec,
+        version=80,
+        files={
+            "stable.md": "# Stable\n\nLegacy callers MUST honor this.\n",
+            "changed.md": "# Changed\n\nOld rule MUST survive.\n",
+        },
+    )
+    # Latest history snapshot (v081) and live tree: stable.md untouched;
+    # changed.md gains a NEW rule.
+    _write_history_version(
+        spec_root=spec,
+        version=81,
+        files={
+            "stable.md": "# Stable\n\nLegacy callers MUST honor this.\n",
+            "changed.md": ("# Changed\n\nOld rule MUST survive.\nBrand-new readers MUST adapt.\n"),
+        },
+    )
+    (spec / "stable.md").write_text("# Stable\n\nLegacy callers MUST honor this.\n")
+    (spec / "changed.md").write_text(
+        "# Changed\n\nOld rule MUST survive.\nBrand-new readers MUST adapt.\n"
+    )
+    rc = main(["--json", "--since-version", "v080"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    payload = json.loads(captured.out)
+    # Only rules in `changed.md` (the diffing file) surface.
+    # stable.md's rule MUST NOT appear because the file is unchanged.
+    assert len(payload["gap_ids"]) == 2
+    # And human form names changed.md only.
+    rc2 = main(["--since-version", "v080"])
+    captured2 = capsys.readouterr()
+    assert rc2 == 0
+    assert "changed.md" in captured2.out
+    assert "stable.md" not in captured2.out
+
+
+def test_since_version_accepts_bare_integer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--since-version 80 (bare integer) works identically to v080."""
+    monkeypatch.chdir(tmp_path)
+    spec = tmp_path / "SPECIFICATION"
+    spec.mkdir()
+    _write_history_version(
+        spec_root=spec,
+        version=80,
+        files={"spec.md": "# T\n\nOld rule MUST hold.\n"},
+    )
+    (spec / "spec.md").write_text("# T\n\nOld rule MUST hold.\nNew rule MUST land.\n")
+    rc = main(["--json", "--since-version", "80"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    payload = json.loads(captured.out)
+    assert len(payload["gap_ids"]) == 2
+
+
+def test_no_since_version_preserves_full_scan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Flag absent → existing behavior: full scan, all gaps."""
+    monkeypatch.chdir(tmp_path)
+    spec = tmp_path / "SPECIFICATION"
+    spec.mkdir()
+    _write_history_version(
+        spec_root=spec,
+        version=80,
+        files={
+            "stable.md": "# Stable\n\nLegacy callers MUST honor this.\n",
+            "changed.md": "# Changed\n\nOld rule MUST survive.\n",
+        },
+    )
+    (spec / "stable.md").write_text("# Stable\n\nLegacy callers MUST honor this.\n")
+    (spec / "changed.md").write_text(
+        "# Changed\n\nOld rule MUST survive.\nNew readers MUST adapt.\n"
+    )
+    rc = main(["--json"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    payload = json.loads(captured.out)
+    # Without scoping, all three live rules surface (stable + 2 from changed).
+    assert len(payload["gap_ids"]) == 3
+
+
+def test_since_version_invalid_non_integer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Invalid --since-version value (vXXX) → exit 2 with usage error."""
+    monkeypatch.chdir(tmp_path)
+    spec = tmp_path / "SPECIFICATION"
+    _write_spec(root=spec, files={"spec.md": "# T\n\nReaders MUST cope.\n"})
+    rc = main(["--since-version", "vXXX"])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "ERROR" in captured.err
+    assert "--since-version" in captured.err
+
+
+def test_since_version_invalid_negative(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Negative integer → exit 2 with usage error."""
+    monkeypatch.chdir(tmp_path)
+    spec = tmp_path / "SPECIFICATION"
+    _write_spec(root=spec, files={"spec.md": "# T\n\nReaders MUST cope.\n"})
+    rc = main(["--since-version", "-3"])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "ERROR" in captured.err
+
+
+def test_since_version_invalid_zero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Zero is not a positive integer → exit 2 with usage error."""
+    monkeypatch.chdir(tmp_path)
+    spec = tmp_path / "SPECIFICATION"
+    _write_spec(root=spec, files={"spec.md": "# T\n\nReaders MUST cope.\n"})
+    rc = main(["--since-version", "0"])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "ERROR" in captured.err
+
+
+def test_since_version_nonexistent_history_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Missing version dir → exit 3 with PreconditionError naming the path."""
+    monkeypatch.chdir(tmp_path)
+    spec = tmp_path / "SPECIFICATION"
+    _write_spec(root=spec, files={"spec.md": "# T\n\nReaders MUST cope.\n"})
+    # Only v001 exists (created by _write_spec). v999 does not.
+    rc = main(["--since-version", "v999"])
+    captured = capsys.readouterr()
+    assert rc == 3
+    assert "ERROR" in captured.err
+    assert "v999" in captured.err
+
+
+def test_since_version_equals_latest_empty_diff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--since-version v<N> where the live tree matches v<N> → empty gap-id set."""
+    monkeypatch.chdir(tmp_path)
+    spec = tmp_path / "SPECIFICATION"
+    spec.mkdir()
+    files = {"spec.md": "# T\n\nReaders MUST cope.\nWriters MUST close.\n"}
+    _write_history_version(spec_root=spec, version=42, files=files)
+    # Live tree matches v042 byte-for-byte.
+    for name, content in files.items():
+        (spec / name).write_text(content)
+    rc = main(["--json", "--since-version", "v042"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    payload = json.loads(captured.out)
+    assert payload["gap_ids"] == []
+
+
+def test_since_version_skips_removed_in_diff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Rules removed by the diff are NOT gaps — only LIVE rules surface."""
+    monkeypatch.chdir(tmp_path)
+    spec = tmp_path / "SPECIFICATION"
+    spec.mkdir()
+    # v050: file has a rule that gets removed in the live spec.
+    _write_history_version(
+        spec_root=spec,
+        version=50,
+        files={"shrink.md": "# Shrink\n\nA: callers MUST quack.\nB: writers MUST close.\n"},
+    )
+    # Live tree: rule A removed, B retained.
+    (spec / "shrink.md").write_text("# Shrink\n\nB: writers MUST close.\n")
+    rc = main(["--json", "--since-version", "v050"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    payload = json.loads(captured.out)
+    # The file CHANGED, so it's in scope. Only the surviving rule
+    # (rule B) surfaces — rule A was removed.
+    assert len(payload["gap_ids"]) == 1
+
+
+def test_since_version_passes_through_spec_target(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--since-version composes with explicit --spec-target / --project-root."""
+    project = tmp_path / "elsewhere"
+    spec = project / "MySpec"
+    spec.mkdir(parents=True)
+    _write_history_version(
+        spec_root=spec,
+        version=10,
+        files={"spec.md": "# T\n\nOld rule MUST survive.\n"},
+    )
+    (spec / "spec.md").write_text("# T\n\nOld rule MUST survive.\nNew rule MUST land.\n")
+    rc = main(
+        [
+            "--project-root",
+            str(project),
+            "--spec-target",
+            str(spec),
+            "--json",
+            "--since-version",
+            "v010",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0
+    payload = json.loads(captured.out)
+    assert len(payload["gap_ids"]) == 2
