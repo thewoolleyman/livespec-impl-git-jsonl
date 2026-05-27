@@ -33,6 +33,18 @@ default:
 # ---------------------------------------------------------------
 
 bootstrap:
+    # Idempotent `core.bare = true` on the primary checkout's
+    # git-common-dir config (per livespec/SPECIFICATION/
+    # non-functional-requirements.md §"Bare-flag enforcement" /
+    # §"Bare-flag bootstrap procedure" — family-wide invariant
+    # inherited by every livespec-impl-* sibling). The flag is the
+    # load-bearing setting that forces every edit through
+    # `git worktree add`. Runs FIRST so partial failure of any
+    # later step cannot leave the bare-flag unset. Targets
+    # `git rev-parse --git-common-dir` so the recipe writes the
+    # right file when invoked from the primary checkout AND from
+    # secondary worktrees.
+    git config --file "$(git rev-parse --git-common-dir)/config" core.bare true
     # Install the git-hook-wrapper that delegates to lefthook via
     # mise. The wrapper fires regardless of the user's shell config
     # and routes commit-msg argv[1] to the v034 D3 replay-hook stage.
@@ -64,6 +76,7 @@ check:
         check-format
         check-types
         check-coverage
+        check-primary-checkout-bare-flag-set
     )
     failed=()
     for t in "${targets[@]}"; do
@@ -100,6 +113,14 @@ check-coverage:
         exit 0
     fi
     uv run pytest -n auto --cov --cov-branch --cov-config=pyproject.toml --cov-report=term-missing
+
+# Family-wide bare-flag invariant per livespec/SPECIFICATION/
+# non-functional-requirements.md §"Bare-flag enforcement". The check is
+# shipped by livespec-dev-tooling (>=v0.3.0); this recipe is the
+# project-root-scoped CI/just-check adoption that the spec mandates for
+# every consumer repo.
+check-primary-checkout-bare-flag-set:
+    uv run python -m livespec_dev_tooling.checks.primary_checkout_bare_flag_set
 
 # ---------------------------------------------------------------
 # Pre-commit aggregate — Red-mode-aware. Classifies the staged
