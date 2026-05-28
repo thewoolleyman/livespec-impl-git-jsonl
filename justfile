@@ -8,7 +8,7 @@
 #   §"Enforcement-suite invocation" — `just` is the canonical entry
 #   point for every dev-tooling invocation. Lefthook and CI MUST
 #   delegate to `just <target>`; direct tool invocations are banned
-#   (enforced by dev-tooling/checks/no_direct_tool_invocation.py).
+#   (enforced by livespec_dev_tooling.checks.no_direct_tool_invocation).
 #
 # Authority: livespec/SPECIFICATION/contracts.md
 #   §"Pre-commit step ordering" — the gates wired here mirror the
@@ -17,12 +17,13 @@
 #   no-commit-on-master + red-green-replay at commit-msg; full
 #   aggregate (with zero-py subsetting) at pre-push.
 #
-# This is a STARTER scaffold. The aggregate below carries only the
-# tool-backed checks (ruff lint/format, pyright types, pytest+cov).
-# As livespec-impl-plaintext authors populate dev-tooling/checks/<slug>.py
-# scripts (claude-md-coverage, heading-coverage, vendor-manifest,
-# no-direct-tool-invocation, check-tools, etc.), add the corresponding
-# `check-<slug>` target to the aggregate so the discipline holds.
+# Authority: livespec/SPECIFICATION/contracts.md
+#   §"Shared code sync — livespec-dev-tooling" (v094 wiring-
+#   completeness invariant) — every canonical slug emitted by
+#   `livespec_dev_tooling.canonical_checks` MUST be wired in this
+#   `check:` aggregate in alphabetical order; livespec-impl-plaintext-
+#   private extras MAY follow after the canonical block. The in-repo
+#   gate `check-aggregate-completeness` enforces this on every run.
 
 # Default to listing targets when no recipe is invoked.
 default:
@@ -64,19 +65,71 @@ ensure-plugins:
     claude plugin install livespec-impl-plaintext@livespec-impl-plaintext
 
 # ---------------------------------------------------------------
-# Aggregate check — tool-backed targets only. Add dev-tooling-
-# backed targets as livespec-impl-plaintext populates the scripts.
+# Aggregate check — runs every check below sequentially. Continues
+# on failure (matches CI fail-fast: false behavior); exits non-zero
+# if any target failed and prints the failure list.
 # ---------------------------------------------------------------
 
 check:
     #!/usr/bin/env bash
     set -uo pipefail
+    # Canonical-check aggregate, per SPECIFICATION/contracts.md
+    # §"Wiring-completeness invariant" (v094): every canonical slug
+    # emitted by `livespec_dev_tooling.canonical_checks` MUST appear
+    # here in alphabetical order; livespec-impl-plaintext-private
+    # checks MAY follow after the canonical block in any order. The
+    # in-repo gate is `check-aggregate-completeness`, which fails if
+    # any canonical slug is missing or out-of-order.
+    #
+    # Aggregator continues on failure (matches CI fail-fast: false)
+    # and exits non-zero with the failure list if any target failed.
     targets=(
-        check-lint
-        check-format
-        check-types
-        check-coverage
+        # ---- Canonical block (37 slugs, alphabetical) ----
+        check-aggregate-completeness
+        check-all-declared
+        check-assert-never-exhaustiveness
+        check-branch-protection-alignment
+        check-check-coverage-incremental
+        check-check-mutation
+        check-check-tools
+        check-claude-md-coverage
+        check-comment-line-anchors
+        check-commit-pairs-source-and-test
+        check-file-lloc
+        check-global-writes
+        check-heading-coverage
+        check-keyword-only-args
+        check-main-guard
+        check-master-ci-green
+        check-match-keyword-only
+        check-newtype-domain-primitives
+        check-no-direct-tool-invocation
+        check-no-except-outside-io
+        check-no-inheritance
+        check-no-lloc-soft-warnings
+        check-no-raise-outside-io
+        check-no-stale-revise-branches
+        check-no-todo-registry
+        check-no-write-direct
+        check-pbt-coverage-pure-modules
+        check-per-file-coverage
         check-primary-checkout-bare-flag-set
+        check-private-calls
+        check-public-api-result-typed
+        check-red-green-replay
+        check-rop-pipeline-shape
+        check-supervisor-discipline
+        check-tests-mirror-pairing
+        check-vendor-manifest
+        check-wrapper-shape
+        # ---- livespec-impl-plaintext-private block ----
+        # Tool-backed checks specific to this repo's toolchain wiring.
+        # `check-coverage` is intentionally absent: it overlaps with
+        # canonical `check-per-file-coverage`. Likewise the canonical
+        # `check-check-tools` subsumes any private check-tools recipe.
+        check-format
+        check-lint
+        check-types
     )
     failed=()
     for t in "${targets[@]}"; do
@@ -93,7 +146,7 @@ check:
     printf '\nAll %d targets passed.\n' "${#targets[@]}"
 
 # ---------------------------------------------------------------
-# Tool-backed checks.
+# Tool-backed checks (livespec-impl-plaintext-private).
 # ---------------------------------------------------------------
 
 check-lint:
@@ -105,28 +158,259 @@ check-format:
 check-types:
     uv run pyright
 
+# Livespec-impl-plaintext-private alias for the canonical per-file
+# coverage gate. Retained for CI matrix + branch-protection.json
+# compatibility (the matrix entry name `check-coverage` is referenced
+# by the protected-status-checks list). The aggregate above wires
+# the canonical `check-per-file-coverage` directly; this alias just
+# delegates so the matrix path still works.
 check-coverage:
+    just check-per-file-coverage
+
+# ---------------------------------------------------------------
+# Canonical structural checks (shared from livespec-dev-tooling).
+# Wired in alphabetical order to match the aggregate above.
+# ---------------------------------------------------------------
+
+# In-repo gate for the wiring-completeness invariant
+# (SPECIFICATION/contracts.md v094 §"Shared code sync —
+# livespec-dev-tooling"). Parses the local `justfile`'s `check:`
+# recipe and verifies every canonical slug emitted by
+# `livespec_dev_tooling.canonical_checks` is wired in alphabetical
+# order, with private extras appearing only after the canonical
+# block. Self-bootstrapping: the slug `check-aggregate-completeness`
+# is itself canonical, so dropping it would fail this check on the
+# next run.
+check-aggregate-completeness:
+    uv run python -m livespec_dev_tooling.checks.aggregate_completeness
+
+check-all-declared:
+    uv run python -m livespec_dev_tooling.checks.all_declared
+
+check-assert-never-exhaustiveness:
+    uv run python -m livespec_dev_tooling.checks.assert_never_exhaustiveness
+
+# Layer 1 mechanical check: shells out to `gh api` to read remote
+# GitHub state; exits 0 with a structured warning when `gh` is
+# unavailable or unauthenticated locally so per-commit pre-commit
+# runs are not blocked. CI with GH_TOKEN exercises the full
+# enforcement path.
+check-branch-protection-alignment:
+    uv run python -m livespec_dev_tooling.checks.branch_protection_alignment
+
+# Canonical-slug alias for the path-scoped incremental coverage
+# check. The canonical slug derived from the module name
+# `check_coverage_incremental.py` is `check-check-coverage-
+# incremental`. Wired into the canonical aggregate (per the
+# wiring-completeness invariant, SPECIFICATION/contracts.md v094)
+# but short-circuits when called with no args — the full-tree
+# per-file 100% gate is enforced by check-per-file-coverage.
+check-check-coverage-incremental *args:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if [[ -z "{{args}}" ]]; then
+        echo ":: check-check-coverage-incremental skipped (no --paths provided; aggregate-mode no-op)"
+        echo ":: full-tree per-file 100% gate is enforced by check-per-file-coverage"
+        exit 0
+    fi
+    uv run python -m livespec_dev_tooling.checks.check_coverage_incremental {{args}}
+
+# Release-gate ONLY — paired with check-no-todo-registry and
+# check-no-lloc-soft-warnings on the release-tag CI workflow. Gated
+# by LIVESPEC_RELEASE_GATE so the canonical aggregate can wire the
+# slug (per SPECIFICATION/contracts.md §"Shared code sync —
+# livespec-dev-tooling" wiring-completeness) without making per-
+# commit `just check` runs choke on the multi-minute mutation
+# suite. The release-tag workflow MUST set LIVESPEC_RELEASE_GATE=1
+# before invoking this target.
+check-check-mutation:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if [[ -z "${LIVESPEC_RELEASE_GATE:-}" ]]; then
+        echo ":: check-check-mutation skipped (LIVESPEC_RELEASE_GATE unset; release-gate-only check)"
+        exit 0
+    fi
+    uv run python -m livespec_dev_tooling.checks.check_mutation
+
+check-check-tools:
+    uv run python -m livespec_dev_tooling.checks.check_tools
+
+check-claude-md-coverage:
+    uv run python -m livespec_dev_tooling.checks.claude_md_coverage
+
+check-comment-line-anchors:
+    uv run python -m livespec_dev_tooling.checks.comment_line_anchors
+
+# Commit-pair gate: every commit touching source files also touches
+# tests. Lefthook pre-commit only is the load-bearing per-commit
+# invocation; wired into the aggregate per the wiring-completeness
+# invariant.
+check-commit-pairs-source-and-test:
+    uv run python -m livespec_dev_tooling.checks.commit_pairs_source_and_test
+
+check-file-lloc:
+    uv run python -m livespec_dev_tooling.checks.file_lloc
+
+check-global-writes:
+    uv run python -m livespec_dev_tooling.checks.global_writes
+
+check-heading-coverage:
+    uv run python -m livespec_dev_tooling.checks.heading_coverage
+
+check-keyword-only-args:
+    uv run python -m livespec_dev_tooling.checks.keyword_only_args
+
+check-main-guard:
+    uv run python -m livespec_dev_tooling.checks.main_guard
+
+# Layer 1 mechanical check: shells out to `gh api` to read remote
+# GitHub state; exits 0 with a structured warning when `gh` is
+# unavailable or unauthenticated locally so per-commit pre-commit
+# runs are not blocked. CI with GH_TOKEN exercises the full
+# enforcement path.
+check-master-ci-green:
+    uv run python -m livespec_dev_tooling.checks.master_ci_green
+
+check-match-keyword-only:
+    uv run python -m livespec_dev_tooling.checks.match_keyword_only
+
+check-newtype-domain-primitives:
+    uv run python -m livespec_dev_tooling.checks.newtype_domain_primitives
+
+check-no-direct-tool-invocation:
+    uv run python -m livespec_dev_tooling.checks.no_direct_tool_invocation
+
+check-no-except-outside-io:
+    uv run python -m livespec_dev_tooling.checks.no_except_outside_io
+
+check-no-inheritance:
+    uv run python -m livespec_dev_tooling.checks.no_inheritance
+
+# Release-gate ONLY — paired with check-check-mutation and check-
+# no-todo-registry on the release-tag CI workflow. Gated by
+# LIVESPEC_RELEASE_GATE so the canonical aggregate can wire the
+# slug (per SPECIFICATION/contracts.md §"Shared code sync —
+# livespec-dev-tooling" wiring-completeness) without making per-
+# commit `just check` runs choke on legitimate authoring
+# placeholders in the 201-250 LLOC soft band. Closes the M3
+# soft-band drift loophole.
+check-no-lloc-soft-warnings:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if [[ -z "${LIVESPEC_RELEASE_GATE:-}" ]]; then
+        echo ":: check-no-lloc-soft-warnings skipped (LIVESPEC_RELEASE_GATE unset; release-gate-only check)"
+        exit 0
+    fi
+    uv run python -m livespec_dev_tooling.checks.no_lloc_soft_warnings
+
+check-no-raise-outside-io:
+    uv run python -m livespec_dev_tooling.checks.no_raise_outside_io
+
+# Refuse new revise passes while a stale spec/* branch is ahead of
+# master. Invoked by livespec's /livespec:revise SKILL.md pre-step
+# refusal; included in the canonical aggregate for cross-cutting
+# self-host coverage (per SPECIFICATION/contracts.md wiring-
+# completeness invariant). The `--allow-stale-branches` flag
+# surfaces the diagnostics as info rather than gating the aggregate;
+# load-bearing enforcement remains at the /livespec:revise pre-step
+# refusal.
+check-no-stale-revise-branches:
+    uv run python -m livespec_dev_tooling.checks.no_stale_revise_branches --allow-stale-branches
+
+# Release-gate ONLY — paired with check-check-mutation and check-
+# no-lloc-soft-warnings on the release-tag CI workflow. Gated by
+# LIVESPEC_RELEASE_GATE so the canonical aggregate can wire the
+# slug (per SPECIFICATION/contracts.md §"Shared code sync —
+# livespec-dev-tooling" wiring-completeness) without making per-
+# commit `just check` runs choke on TODO entries that are
+# legitimate authoring placeholders. The release-tag workflow
+# MUST set LIVESPEC_RELEASE_GATE=1 before invoking this target.
+check-no-todo-registry:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if [[ -z "${LIVESPEC_RELEASE_GATE:-}" ]]; then
+        echo ":: check-no-todo-registry skipped (LIVESPEC_RELEASE_GATE unset; release-gate-only check)"
+        exit 0
+    fi
+    uv run python -m livespec_dev_tooling.checks.no_todo_registry
+
+check-no-write-direct:
+    uv run python -m livespec_dev_tooling.checks.no_write_direct
+
+check-pbt-coverage-pure-modules:
+    uv run python -m livespec_dev_tooling.checks.pbt_coverage_pure_modules
+
+# Full per-file 100% line+branch coverage gate. Canonical-slug
+# alias for the shared per_file_coverage check. The Red-mode skip
+# preserved: when LIVESPEC_PRECOMMIT_RED_MODE is set by the Red-
+# mode-aware pre-commit aggregate, pytest is skipped (commit-msg
+# replay hook is the verifier; aggregate-time coverage is not
+# load-bearing in Red mode).
+check-per-file-coverage:
     #!/usr/bin/env bash
     set -uo pipefail
     if [[ -n "${LIVESPEC_PRECOMMIT_RED_MODE:-}" ]]; then
-        echo ":: check-coverage skipped (Red-mode pre-commit; verified at Green amend)"
+        echo ":: check-per-file-coverage skipped (Red-mode pre-commit; verified at Green amend)"
         exit 0
     fi
+    # pytest-cov defaults `--cov-config` to `.coveragerc`, which
+    # bypasses pyproject.toml's `[tool.coverage.run]` (including
+    # the `omit = [...]` carve-outs). Pass the config path
+    # explicitly so the vendored-tree exclusion takes effect.
     uv run pytest -n auto --cov --cov-branch --cov-config=pyproject.toml --cov-report=term-missing
+    uv run python -m livespec_dev_tooling.checks.per_file_coverage
 
 # Family-wide bare-flag invariant per livespec/SPECIFICATION/
-# non-functional-requirements.md §"Bare-flag enforcement". The check is
-# shipped by livespec-dev-tooling (>=v0.3.0); this recipe is the
-# project-root-scoped CI/just-check adoption that the spec mandates for
-# every consumer repo.
+# non-functional-requirements.md §"Bare-flag enforcement". The check
+# is shipped by livespec-dev-tooling (>=v0.3.0); this recipe is the
+# project-root-scoped CI/just-check adoption that the spec mandates
+# for every consumer repo.
 check-primary-checkout-bare-flag-set:
     uv run python -m livespec_dev_tooling.checks.primary_checkout_bare_flag_set
+
+check-private-calls:
+    uv run python -m livespec_dev_tooling.checks.private_calls
+
+check-public-api-result-typed:
+    uv run python -m livespec_dev_tooling.checks.public_api_result_typed
+
+# Trailer-based Red→Green replay verification (hard gate). Invoked
+# by lefthook commit-msg stage (NOT pre-commit) — the hook requires
+# the commit-message file path as argv[1] to write trailers via
+# `git interpret-trailers --in-place`. Wired into the canonical
+# aggregate (per SPECIFICATION/contracts.md v094 wiring-completeness)
+# but the recipe short-circuits when called with no args — the
+# load-bearing verifier is the commit-msg hook, not `just check`.
+check-red-green-replay *args:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if [[ -z "{{args}}" ]]; then
+        echo ":: check-red-green-replay skipped (no msg_path provided; aggregate-mode no-op)"
+        echo ":: load-bearing verifier is the commit-msg hook (lefthook)"
+        exit 0
+    fi
+    uv run python -m livespec_dev_tooling.checks.red_green_replay {{args}}
+
+check-rop-pipeline-shape:
+    uv run python -m livespec_dev_tooling.checks.rop_pipeline_shape
+
+check-supervisor-discipline:
+    uv run python -m livespec_dev_tooling.checks.supervisor_discipline
+
+check-tests-mirror-pairing:
+    uv run python -m livespec_dev_tooling.checks.tests_mirror_pairing
+
+check-vendor-manifest:
+    uv run python -m livespec_dev_tooling.checks.vendor_manifest
+
+check-wrapper-shape:
+    uv run python -m livespec_dev_tooling.checks.wrapper_shape
 
 # ---------------------------------------------------------------
 # Pre-commit aggregate — Red-mode-aware. Classifies the staged
 # tree shape; sets LIVESPEC_PRECOMMIT_RED_MODE=1 in Red mode so
-# check-coverage skips (commit-msg replay hook is the verifier).
-# Pre-push and CI keep invoking `just check` directly.
+# check-per-file-coverage skips (commit-msg replay hook is the
+# verifier). Pre-push and CI keep invoking `just check` directly.
 # ---------------------------------------------------------------
 
 check-pre-commit:
@@ -148,21 +432,40 @@ check-pre-commit:
     fi
     if [[ "$test_count" -eq 1 ]] && [[ "$impl_count" -eq 0 ]]; then
         echo ":: Red-mode shape detected: $test_staged"
-        echo ":: skipping check-coverage (commit-msg replay hook is the verifier)"
+        echo ":: skipping check-per-file-coverage (commit-msg replay hook is the verifier)"
         export LIVESPEC_PRECOMMIT_RED_MODE=1
     fi
     just check
 
 # When zero `.py` files are staged, `check-pre-commit` delegates here.
 # Pre-push delegates here via `check-pre-push` for zero-py changesets.
-# Add doc-only-relevant repo-metadata checks (claude-md-coverage,
-# heading-coverage, vendor-manifest, no-direct-tool-invocation,
-# check-tools) as livespec-impl-plaintext populates dev-tooling/checks/.
+# check-claude-md-coverage and check-heading-coverage are intentionally
+# absent here: backlog work-items li-bb5suo (CLAUDE.md backfill) and
+# li-4liaxt (heading-coverage backfill) close the gap; until those land
+# they would force every doc-only commit to fail the pre-commit gate.
+# They remain wired in the full `just check` aggregate (and surface in
+# pre-push) as the load-bearing canonical contract.
 check-pre-commit-doc-only:
     #!/usr/bin/env bash
     set -uo pipefail
-    echo ":: doc-only subset (no repo-metadata checks wired yet — populate as scripts land)"
-    exit 0
+    targets=(
+        check-vendor-manifest
+        check-no-direct-tool-invocation
+        check-check-tools
+    )
+    failed=()
+    for t in "${targets[@]}"; do
+        printf '\n::: just %s\n' "$t"
+        if ! just "$t"; then
+            failed+=("$t")
+        fi
+    done
+    if [[ ${#failed[@]} -gt 0 ]]; then
+        printf '\nFailed targets (%d):\n' "${#failed[@]}"
+        printf '  - %s\n' "${failed[@]}"
+        exit 1
+    fi
+    printf '\nAll %d doc-only targets passed.\n' "${#targets[@]}"
 
 # Skip the Python-code check subset when the pushed commits contain
 # zero `.py` changes; those checks are deterministic functions of
@@ -183,17 +486,6 @@ check-pre-push:
     just check
 
 # ---------------------------------------------------------------
-# Commit-message gates. Invoked by lefthook commit-msg stage; the
-# commit-message file path arrives as argv[1] via lefthook's {1}.
-# ---------------------------------------------------------------
-
-# v034 D3 hard gate: trailer-based Red→Green replay verification.
-# Requires dev-tooling/checks/red_green_replay.py — populate when
-# adopting the Red→Green replay discipline.
-check-red-green-replay msg_path:
-    uv run python -m livespec_dev_tooling.checks.red_green_replay {{msg_path}}
-
-# ---------------------------------------------------------------
 # Pre-commit auxiliary gates.
 # ---------------------------------------------------------------
 
@@ -211,12 +503,6 @@ lint-autofix-staged:
     echo "$staged" | xargs uv run ruff check --fix --exit-zero
     echo "$staged" | xargs uv run ruff format
     echo "$staged" | xargs git add
-
-# Commit-pair gate: every commit touching source files also touches
-# tests. Requires dev-tooling/checks/commit_pairs_source_and_test.py
-# — populate when adopting the pair-with-test discipline.
-check-commit-pairs-source-and-test:
-    uv run python -m livespec_dev_tooling.checks.commit_pairs_source_and_test
 
 # ---------------------------------------------------------------
 # Mutating targets (opt-in; not run in CI).
