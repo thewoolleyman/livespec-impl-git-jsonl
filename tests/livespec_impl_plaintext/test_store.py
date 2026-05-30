@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from livespec_impl_plaintext.errors import (
@@ -85,6 +86,7 @@ def test_append_work_item_with_audit_roundtrips(tmp_path: Path) -> None:
         verification_timestamp="2026-05-19T01:00:00Z",
         commits=("deadbeef",),
         files_changed=("a.py",),
+        merge_sha="abc123",
     )
     item = _minimal_work_item(id_="li-zzz999", status="closed", resolution="completed", audit=audit)
     append_work_item(path=path, item=item)
@@ -537,3 +539,178 @@ def test_read_work_item_still_rejects_unexpected_extra_keys(tmp_path: Path) -> N
     with pytest.raises(SchemaViolationError) as excinfo:
         list(read_work_items(path=path))
     assert "unexpected extra keys" in excinfo.value.detail
+
+
+# -- audit merge-evidence fields (li-tenpup; contracts.md "Work-items
+#    JSONL record schema" -> audit.merge_sha + audit.pr_number) ----------
+
+
+def _audit_payload_dict(
+    *,
+    merge_sha: str = "abc123",
+    pr_number: int | None = 7,
+) -> dict[str, Any]:
+    """A complete on-disk audit sub-object including the merge-evidence keys."""
+    return {
+        "verification_timestamp": "2026-05-19T00:00:00Z",
+        "commits": ["deadbeef"],
+        "files_changed": ["a.py"],
+        "merge_sha": merge_sha,
+        "pr_number": pr_number,
+    }
+
+
+def _closed_payload_with_audit(*, audit: dict[str, Any] | None) -> dict[str, Any]:
+    """A closed/completed work-item payload carrying the supplied audit object."""
+    return {
+        "id": "li-merge1",
+        "type": "task",
+        "status": "closed",
+        "title": "t",
+        "description": "d",
+        "origin": "freeform",
+        "gap_id": None,
+        "priority": 2,
+        "assignee": None,
+        "depends_on": [],
+        "captured_at": "2026-05-19T00:00:00Z",
+        "resolution": "completed",
+        "reason": "done",
+        "audit": audit,
+        "superseded_by": None,
+        "spec_commitment_hint": None,
+    }
+
+
+def test_audit_record_carries_merge_sha_and_pr_number() -> None:
+    """AuditRecord exposes the merge_sha and pr_number attributes."""
+    audit = AuditRecord(
+        verification_timestamp="2026-05-19T00:00:00Z",
+        commits=("deadbeef",),
+        files_changed=("a.py",),
+        merge_sha="abc123",
+        pr_number=7,
+    )
+    assert audit.merge_sha == "abc123"
+    assert audit.pr_number == 7
+
+
+def test_audit_record_pr_number_defaults_to_none() -> None:
+    """pr_number is optional at the dataclass level and defaults to None."""
+    audit = AuditRecord(
+        verification_timestamp="2026-05-19T00:00:00Z",
+        commits=("deadbeef",),
+        files_changed=("a.py",),
+        merge_sha="abc123",
+    )
+    assert audit.pr_number is None
+
+
+def test_append_work_item_with_merge_evidence_roundtrips(tmp_path: Path) -> None:
+    """A closed work-item with merge_sha + pr_number round-trips losslessly."""
+    path = tmp_path / "work-items.jsonl"
+    audit = AuditRecord(
+        verification_timestamp="2026-05-19T01:00:00Z",
+        commits=("deadbeef",),
+        files_changed=("a.py",),
+        merge_sha="abc123def",
+        pr_number=42,
+    )
+    item = _minimal_work_item(
+        id_="li-merge9",
+        status="closed",
+        resolution="completed",
+        audit=audit,
+    )
+    append_work_item(path=path, item=item)
+    [read_back] = list(read_work_items(path=path))
+    assert read_back == item
+    assert read_back.audit is not None
+    assert read_back.audit.merge_sha == "abc123def"
+    assert read_back.audit.pr_number == 42
+
+
+def test_append_work_item_serializes_merge_evidence_keys(tmp_path: Path) -> None:
+    """The write path emits merge_sha and pr_number inside the audit object."""
+    path = tmp_path / "work-items.jsonl"
+    audit = AuditRecord(
+        verification_timestamp="2026-05-19T01:00:00Z",
+        commits=("deadbeef",),
+        files_changed=("a.py",),
+        merge_sha="abc123def",
+        pr_number=None,
+    )
+    item = _minimal_work_item(
+        id_="li-merge8",
+        status="closed",
+        resolution="completed",
+        audit=audit,
+    )
+    append_work_item(path=path, item=item)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["audit"]["merge_sha"] == "abc123def"
+    assert "pr_number" in payload["audit"]
+    assert payload["audit"]["pr_number"] is None
+
+
+def test_read_audit_missing_merge_sha_raises(tmp_path: Path) -> None:
+    """An audit object lacking merge_sha fires a SchemaViolationError."""
+    path = tmp_path / "work-items.jsonl"
+    audit = _audit_payload_dict()
+    del audit["merge_sha"]
+    payload = _closed_payload_with_audit(audit=audit)
+    _ = path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    with pytest.raises(SchemaViolationError) as excinfo:
+        list(read_work_items(path=path))
+    assert "merge_sha" in excinfo.value.detail
+
+
+def test_read_audit_empty_merge_sha_raises(tmp_path: Path) -> None:
+    """An empty-string merge_sha violates the non-empty requirement."""
+    path = tmp_path / "work-items.jsonl"
+    payload = _closed_payload_with_audit(audit=_audit_payload_dict(merge_sha=""))
+    _ = path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    with pytest.raises(SchemaViolationError) as excinfo:
+        list(read_work_items(path=path))
+    assert "merge_sha" in excinfo.value.detail
+
+
+def test_read_audit_non_int_pr_number_raises(tmp_path: Path) -> None:
+    """A non-integer, non-null pr_number fires a SchemaViolationError."""
+    path = tmp_path / "work-items.jsonl"
+    audit = _audit_payload_dict()
+    audit["pr_number"] = "not-an-int"
+    payload = _closed_payload_with_audit(audit=audit)
+    _ = path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    with pytest.raises(SchemaViolationError) as excinfo:
+        list(read_work_items(path=path))
+    assert "pr_number" in excinfo.value.detail
+
+
+def test_read_audit_with_null_pr_number_roundtrips(tmp_path: Path) -> None:
+    """A null pr_number is permitted and reads back as None."""
+    path = tmp_path / "work-items.jsonl"
+    payload = _closed_payload_with_audit(audit=_audit_payload_dict(pr_number=None))
+    _ = path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    [read_back] = list(read_work_items(path=path))
+    assert read_back.audit is not None
+    assert read_back.audit.merge_sha == "abc123"
+    assert read_back.audit.pr_number is None
+
+
+def test_read_audit_without_pr_number_key_defaults_to_none(tmp_path: Path) -> None:
+    """A legacy audit object omitting pr_number entirely reads back as None.
+
+    Exercises the optional-on-read path: `pr_number` absent from the audit
+    object still validates (merge_sha present and non-empty) and materializes
+    with `pr_number=None`.
+    """
+    path = tmp_path / "work-items.jsonl"
+    audit = _audit_payload_dict()
+    del audit["pr_number"]
+    payload = _closed_payload_with_audit(audit=audit)
+    _ = path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    [read_back] = list(read_work_items(path=path))
+    assert read_back.audit is not None
+    assert read_back.audit.merge_sha == "abc123"
+    assert read_back.audit.pr_number is None

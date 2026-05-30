@@ -38,11 +38,24 @@ Disposition = Literal[
 
 @dataclass(frozen=True, kw_only=True)
 class AuditRecord:
-    """Audit-trail fields captured at completed-resolution closure time."""
+    """Audit-trail fields captured at completed-resolution closure time.
+
+    `merge_sha` and `pr_number` are the merge-evidence fields landed for
+    li-tenpup (the `work-item-merge-evidence` child PC). Per
+    SPECIFICATION/contracts.md "Work-items JSONL record schema" -> audit,
+    `merge_sha` is the required, non-empty SHA of the merge commit on the
+    canonical branch that introduced the work; `pr_number` is the optional
+    GitHub PR number (int or `None`) for traceability. Audit objects authored
+    before `pr_number` landed read back as `None` without firing a schema
+    violation; `merge_sha` is required-on-read for any audit object the
+    merge-evidence static check will later attest.
+    """
 
     verification_timestamp: str
     commits: tuple[str, ...]
     files_changed: tuple[str, ...]
+    merge_sha: str
+    pr_number: int | None = None
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -279,8 +279,14 @@ def _validate_audit_payload(
     line_number: int,
     parsed: dict[str, Any],
 ) -> None:
-    """Verify an audit sub-object's required keys are present."""
-    required = frozenset({"verification_timestamp", "commits", "files_changed"})
+    """Verify an audit sub-object's required keys and merge-evidence fields.
+
+    Per SPECIFICATION/contracts.md "Work-items JSONL record schema" -> audit,
+    `merge_sha` is a required, non-empty string and `pr_number` (when present)
+    is an integer or null. `pr_number` is optional-on-read so audit objects
+    authored before the field landed still parse cleanly.
+    """
+    required = frozenset({"verification_timestamp", "commits", "files_changed", "merge_sha"})
     missing = required - parsed.keys()
     if missing:
         raise SchemaViolationError(
@@ -288,6 +294,27 @@ def _validate_audit_payload(
             line_number=line_number,
             detail=f"audit object missing keys: {sorted(missing)}",
         )
+    merge_sha_value = parsed["merge_sha"]
+    if not isinstance(merge_sha_value, str) or merge_sha_value == "":
+        raise SchemaViolationError(
+            path=path,
+            line_number=line_number,
+            detail="audit field 'merge_sha' must be a non-empty string",
+        )
+    if "pr_number" in parsed:
+        pr_number_value = parsed["pr_number"]
+        is_valid_pr_number = pr_number_value is None or (
+            isinstance(pr_number_value, int) and not isinstance(pr_number_value, bool)
+        )
+        if not is_valid_pr_number:
+            raise SchemaViolationError(
+                path=path,
+                line_number=line_number,
+                detail=(
+                    f"audit field 'pr_number' must be an integer or null, "
+                    f"got {type(pr_number_value).__name__}"
+                ),
+            )
 
 
 def _parse_audit(*, path: Path, line_number: int, parsed: dict[str, Any]) -> AuditRecord:
@@ -296,6 +323,8 @@ def _parse_audit(*, path: Path, line_number: int, parsed: dict[str, Any]) -> Aud
         verification_timestamp=parsed["verification_timestamp"],
         commits=tuple(parsed["commits"]),
         files_changed=tuple(parsed["files_changed"]),
+        merge_sha=parsed["merge_sha"],
+        pr_number=parsed.get("pr_number"),
     )
 
 
@@ -408,6 +437,8 @@ def _work_item_to_dict(*, item: WorkItem) -> dict[str, Any]:
             "verification_timestamp": item.audit.verification_timestamp,
             "commits": list(item.audit.commits),
             "files_changed": list(item.audit.files_changed),
+            "merge_sha": item.audit.merge_sha,
+            "pr_number": item.audit.pr_number,
         }
     return payload
 
