@@ -37,6 +37,8 @@ def _item(
             verification_timestamp="2026-05-19T01:00:00Z",
             commits=("c",),
             files_changed=("f",),
+            merge_sha="abc123",
+            pr_number=None,
         )
         if status == "closed"
         else None,

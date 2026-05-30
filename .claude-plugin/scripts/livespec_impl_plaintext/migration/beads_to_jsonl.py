@@ -127,6 +127,8 @@ def _extract_audit(
         verification_timestamp=verification_timestamp,
         commits=(),
         files_changed=(),
+        merge_sha="<pre-schema-bootstrap>",
+        pr_number=None,
     )
 
 
