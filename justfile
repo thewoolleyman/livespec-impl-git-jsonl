@@ -177,6 +177,13 @@ check:
         check-lint
         check-types
         check-coverage
+        # Orchestrator-private store-integrity checks, per
+        # SPECIFICATION/contracts.md "Append-only store disciplines" ->
+        # "Store-integrity checks (orchestrator-private)" (v008): wired
+        # into THIS repo's `just check` aggregate (NOT livespec's
+        # doctor — the work-items and memos stores are orchestrator-
+        # private under the re-steered contract).
+        check-no-divergent-heads
     )
     failed=()
     ran=0
@@ -245,6 +252,21 @@ check-coverage:
         echo ":: check-coverage: no .coverage data file (CI standalone job); running the suite"
         uv run pytest -n auto --cov --cov-branch --cov-config=pyproject.toml --cov-report=term-missing
     fi
+
+# ---------------------------------------------------------------
+# Orchestrator-private store-integrity checks (livespec-impl-git-
+# jsonl-private; v008 SPECIFICATION/contracts.md "Append-only store
+# disciplines"). Both consume the canonical reducer / query surface
+# in livespec_impl_git_jsonl.store — never a private re-derivation
+# of "latest wins" (the one-canonical-reducer obligation).
+# ---------------------------------------------------------------
+
+# Fails when any entity id in a declared backing store (work-items +
+# memos) resolves to more than one un-superseded head, naming the
+# offending entity id and the conflicting record identities. Absent
+# store files are skipped; malformed/schema-violating stores fail.
+check-no-divergent-heads:
+    uv run python3 .claude-plugin/scripts/bin/check_no_divergent_heads.py
 
 # ---------------------------------------------------------------
 # Canonical structural checks (shared from livespec-dev-tooling).
