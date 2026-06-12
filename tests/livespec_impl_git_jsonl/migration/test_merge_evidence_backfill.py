@@ -16,6 +16,7 @@ Strategy (b) — the `--grandfather` fallback — populates the
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -455,3 +456,28 @@ def test_honors_canonical_branch_flag(
     audit = index["li-aaa111"].audit
     assert audit is not None
     assert audit.merge_sha == work_sha
+
+
+def test_module_is_invocable_as_a_script(tmp_path: Path) -> None:
+    """The __main__ guard threads main()'s exit code to the shell."""
+    module_path = (
+        Path(__file__).resolve().parents[3]
+        / ".claude-plugin"
+        / "scripts"
+        / "livespec_impl_git_jsonl"
+        / "migration"
+        / "merge_evidence_backfill.py"
+    )
+    env = {
+        "PATH": os.environ["PATH"],
+        "PYTHONPATH": str(module_path.parents[2]),
+    }
+    completed = subprocess.run(
+        [sys.executable, str(module_path), "--path", str(tmp_path / "absent.jsonl")],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 1
+    assert "does not exist" in completed.stderr
