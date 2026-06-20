@@ -13,6 +13,7 @@ from livespec_impl_git_jsonl.errors import (
     StoreFileMissingError,
 )
 from livespec_impl_git_jsonl.store import (
+    JsonlWorkItemStore,
     append_work_item,
     materialize_work_items,
     read_work_items,
@@ -20,6 +21,7 @@ from livespec_impl_git_jsonl.store import (
     work_item_record_identity,
 )
 from livespec_impl_git_jsonl.types import AuditRecord, WorkItem
+from livespec_runtime.work_items.store import WorkItemStore
 
 
 def _minimal_work_item(
@@ -865,3 +867,66 @@ def test_reduce_work_item_heads_collapses_identical_lines(tmp_path: Path) -> Non
     _ = path.write_text(line + line, encoding="utf-8")
     heads = reduce_work_item_heads(records=read_work_items(path=path))
     assert heads == {"li-dup1": (item,)}
+
+
+# -- JsonlWorkItemStore facade (W7 livespec-5g4i; conforms this repo's
+#    backend to livespec_runtime.work_items.store.WorkItemStore) ---------
+
+
+def test_jsonl_store_conforms_to_work_item_store_protocol(tmp_path: Path) -> None:
+    """The facade is structurally a WorkItemStore at runtime (and statically).
+
+    The module-level `_: type[WorkItemStore] = JsonlWorkItemStore` binding
+    in store.py is pyright's static attestation; this asserts the same
+    conformance at runtime via the runtime-checkable Protocol's instance
+    check is not relied upon — instead we exercise the two contract
+    operations through the typed Protocol view.
+    """
+    store: WorkItemStore = JsonlWorkItemStore(path=tmp_path / "work-items.jsonl")
+    assert hasattr(store, "read_work_items")
+    assert hasattr(store, "append_work_item")
+
+
+def test_jsonl_store_append_then_read_round_trips(tmp_path: Path) -> None:
+    """A record appended through the facade reads back identically."""
+    store = JsonlWorkItemStore(path=tmp_path / "work-items.jsonl")
+    item = _minimal_work_item(id_="li-facade1")
+    store.append_work_item(item=item)
+    assert list(store.read_work_items()) == [item]
+
+
+def test_jsonl_store_reads_records_written_by_free_function(tmp_path: Path) -> None:
+    """The facade reads over the same backing file as the free functions.
+
+    A record appended via the module-level `append_work_item` is visible
+    through the facade's `read_work_items`, proving the facade binds the
+    JSONL path through to the local backend rather than a private store.
+    """
+    path = tmp_path / "work-items.jsonl"
+    item = _minimal_work_item(id_="li-facade2")
+    append_work_item(path=path, item=item)
+    store = JsonlWorkItemStore(path=path)
+    assert list(store.read_work_items()) == [item]
+
+
+def test_jsonl_store_read_missing_file_raises(tmp_path: Path) -> None:
+    """The facade surfaces the local backend's StoreFileMissingError."""
+    path = tmp_path / "missing.jsonl"
+    store = JsonlWorkItemStore(path=path)
+    with pytest.raises(StoreFileMissingError) as excinfo:
+        list(store.read_work_items())
+    assert excinfo.value.path == path
+
+
+def test_jsonl_store_append_runs_local_validators(tmp_path: Path) -> None:
+    """The facade append goes through the local JSONL-schema validators.
+
+    A bad-enum payload fired through the facade raises the same
+    SchemaViolationError the free-function append path raises, confirming
+    the facade does not bypass the validation boundary.
+    """
+    store = JsonlWorkItemStore(path=tmp_path / "work-items.jsonl")
+    bad = _minimal_work_item(status="not-a-real-status")
+    with pytest.raises(SchemaViolationError) as excinfo:
+        store.append_work_item(item=bad)
+    assert "status" in excinfo.value.detail

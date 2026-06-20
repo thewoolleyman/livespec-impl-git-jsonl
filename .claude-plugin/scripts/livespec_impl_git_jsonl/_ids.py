@@ -3,29 +3,22 @@
 Per SPECIFICATION/contracts.md §"Work-items JSONL record schema",
 work-item IDs follow the upstream `bd` convention `li-<6-char-base32-suffix>`.
 
-The suffix is six lowercase base32 characters (a-z, 2-7). Randomness
-comes from `secrets.token_bytes` so collision probability is negligible
-under the JSONL store's append-only discipline; if two skills append
-records with identical IDs in the same git commit's pre-merge state, git
-merge will surface the conflict and the user resolves it like any other
-race.
+The six-lowercase-base32-character suffix generator is the SHARED
+`livespec_runtime.work_items.reduce.random_id_suffix` (this repo's
+`_random_suffix`, lifted byte-faithfully into runtime by the W7
+extraction). The backend-coupled `li-` minting stays LOCAL here:
+randomness comes from `secrets.token_bytes` so collision probability is
+negligible under the JSONL store's append-only discipline; if two skills
+append records with identical IDs in the same git commit's pre-merge
+state, git merge will surface the conflict and the user resolves it like
+any other race.
 """
 
-import base64
-import secrets
+from livespec_runtime.work_items.reduce import random_id_suffix
 
 __all__: list[str] = ["new_work_item_id"]
-
-_SUFFIX_BYTES = 4  # 4 bytes → 32 bits → base32 yields ~7 chars; trimmed to 6.
-_SUFFIX_LENGTH = 6
 
 
 def new_work_item_id() -> str:
     """Return a fresh `li-XXXXXX` identifier."""
-    return f"li-{_random_suffix()}"
-
-
-def _random_suffix() -> str:
-    raw = secrets.token_bytes(_SUFFIX_BYTES)
-    encoded = base64.b32encode(raw).decode("ascii").lower()
-    return encoded[:_SUFFIX_LENGTH]
+    return f"li-{random_id_suffix()}"
