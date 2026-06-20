@@ -6,7 +6,7 @@ public module per query-only skill:
 - `detect_impl_gaps.py` — mechanical spec→impl gap detection via the
   Spec Reader; pure read-and-emit (never mutates the JSONL, never
   prompts).
-- `list_memos.py`, `list_work_items.py` — JSONL store listing.
+- `list_work_items.py` — JSONL store listing.
 - `next.py` — the ripeness ranker; a pure function of work-items
   JSONL state plus the cross-repo manifest at
   `<project-root>/.livespec.jsonc`.

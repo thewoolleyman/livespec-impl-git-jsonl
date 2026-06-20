@@ -2,7 +2,7 @@
 
 Shebang-wrapper executables (`#!/usr/bin/env python3`) — one per
 thin-transport or migration entry point: `detect_impl_gaps.py`,
-`list_memos.py`, `list_work_items.py`, `next.py`, `migrate_beads.py`.
+`list_work_items.py`, `next.py`, `migrate_beads.py`.
 Each wrapper is a no-logic supervisor entry point of the canonical
 shape:
 
