@@ -35,6 +35,12 @@ skip := ""
 default:
     @just --list
 
+# Golden-master acceptance harness. Kept outside `just check` so the
+# fast aggregate remains the local/pre-push safety net while CI can
+# expose this as a separate merge-gate status.
+acceptance:
+    uv run pytest acceptance -q
+
 # ---------------------------------------------------------------
 # First-time setup.
 # ---------------------------------------------------------------
