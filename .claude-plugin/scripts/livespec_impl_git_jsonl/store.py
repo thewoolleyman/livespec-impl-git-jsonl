@@ -8,28 +8,37 @@ entity is its supersession-chain head, computed from the in-record
 the file (git may reorder lines during a merge; the legacy "latest
 record by file order wins" reduction is retired).
 
+The canonical PURE reduction — `work_item_record_identity`,
+`reduce_work_item_heads`, `materialize_work_items` — is the SHARED
+surface this repo donated byte-faithfully to the W7 extraction; it now
+lives in `livespec_runtime.work_items.reduce` and is RE-EXPORTED here so
+every consumer keeps importing it from `livespec_impl_git_jsonl.store`
+unchanged. What stays LOCAL is the JSONL-specific backend I/O
+(`read_work_items` / `append_work_item` over `io/store.py`), the
+JSONL-schema validators (`_validate_work_item_payload` / `_check_*` /
+`_validate_audit_payload`), and the dict<->WorkItem boundary
+(`_parse_work_item` on read, `_work_item_to_dict` on write).
+
+`JsonlWorkItemStore` is the thin facade that conforms this repo's
+backend to the shared `livespec_runtime.work_items.store.WorkItemStore`
+Protocol (a stream of records out, one record in) without rewriting any
+call site; the module-level `_: type[WorkItemStore]` binding makes
+pyright attest that conformance statically.
+
 Public API:
 
 - `read_work_items(*, path)` — stream WorkItem records from the file
   (raises StoreFileMissingError if absent).
 - `append_work_item(*, path, item)` — write a new record line.
-- `work_item_record_identity(*, item)` — the stable per-record
-  identity: `sha256:<hex-digest>` over the record's canonical
-  serialization (every schema key explicit, sorted keys, compact
-  separators — exactly the line bytes the append path writes, without
-  the trailing newline). Derivable from record content alone; the
-  value a superseding record carries in its `supersedes` key.
-- `reduce_work_item_heads(*, records)` — the canonical
-  order-independent reduction: per entity `id`, every record whose
-  identity no sibling record's `supersedes` names, ordered ascending by
-  the deterministic tie-break (`captured_at`, then per-record
-  identity). Identical records (equal identity — e.g. a line
-  duplicated by a `merge=union` merge) collapse to one. More than one
-  head for an `id` is concurrent divergence, surfaced for detection
-  rather than silently resolved.
-- `materialize_work_items(records)` — reduce a stream to the
-  current-head-per-id dict (the tie-break winner among each entity's
-  heads).
+- `work_item_record_identity(*, item)` — re-exported canonical
+  per-record identity (`sha256:<hex-digest>` over the canonical
+  serialization).
+- `reduce_work_item_heads(*, records)` — re-exported canonical
+  order-independent head reduction.
+- `materialize_work_items(*, records)` — re-exported reduction to the
+  current-head-per-id dict.
+- `JsonlWorkItemStore` — the WorkItemStore-conforming facade over the
+  free functions above.
 
 The reader functions validate every record against the schema; a
 violation raises SchemaViolationError carrying the offending line
@@ -37,12 +46,17 @@ number. A non-JSON line raises MalformedRecordLineError. Both are
 EXPECTED errors per the Result-vs-bugs split.
 """
 
-import hashlib
-import json
 from collections.abc import Iterator
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Protocol, TypeVar, get_args
+from typing import Any, get_args
+
+from livespec_runtime.work_items.reduce import (
+    materialize_work_items,
+    reduce_work_item_heads,
+    work_item_record_identity,
+)
+from livespec_runtime.work_items.store import WorkItemStore
 
 from livespec_impl_git_jsonl.errors import SchemaViolationError
 from livespec_impl_git_jsonl.io.store import (
@@ -90,28 +104,13 @@ _WORK_ITEM_OPTIONAL_KEYS = frozenset({"spec_commitment_hint", "supersedes"})
 _WORK_ITEM_ALLOWED_KEYS = _WORK_ITEM_REQUIRED_KEYS | _WORK_ITEM_OPTIONAL_KEYS
 
 __all__: list[str] = [
+    "JsonlWorkItemStore",
     "append_work_item",
     "materialize_work_items",
     "read_work_items",
     "reduce_work_item_heads",
     "work_item_record_identity",
 ]
-
-
-class _SupersedableRecord(Protocol):
-    """Structural shape the canonical head reduction consumes."""
-
-    @property
-    def id(self) -> str: ...
-
-    @property
-    def captured_at(self) -> str: ...
-
-    @property
-    def supersedes(self) -> str | None: ...
-
-
-_RecordT = TypeVar("_RecordT", bound=_SupersedableRecord)
 
 
 def read_work_items(*, path: Path) -> Iterator[WorkItem]:
@@ -134,73 +133,33 @@ def append_work_item(*, path: Path, item: WorkItem) -> None:
     _append_record(path=path, payload=payload)
 
 
-def work_item_record_identity(*, item: WorkItem) -> str:
-    """Return the stable per-record identity of a work-item record.
+class JsonlWorkItemStore:
+    """WorkItemStore-conforming facade over this repo's JSONL backend.
 
-    `sha256:<hex-digest>` over the record's canonical serialization
-    (all sixteen schema keys explicit, sorted, compact separators).
-    Legacy records read back from disk without the optional keys
-    normalize to the same canonical form, so the identity is a pure
-    function of record content — no file positions, no external state.
+    Conforms structurally to
+    `livespec_runtime.work_items.store.WorkItemStore` by exposing the two
+    Protocol operations over the module-level free functions, binding the
+    single JSONL `Path` (git-jsonl's `StoreConfig` wraps exactly one
+    `Path`, `work_items_path`, which is passed here directly). No call site
+    is rewritten: tools that want the Protocol view construct this facade;
+    everything else keeps calling the free functions.
     """
-    return _record_identity(payload=_work_item_to_dict(item=item))
+
+    def __init__(self, *, path: Path) -> None:
+        self._path = path
+
+    def read_work_items(self) -> Iterator[WorkItem]:
+        """Stream every WorkItem record the backing JSONL file holds."""
+        return read_work_items(path=self._path)
+
+    def append_work_item(self, *, item: WorkItem) -> None:
+        """Append a single WorkItem record to the backing JSONL file."""
+        append_work_item(path=self._path, item=item)
 
 
-def reduce_work_item_heads(*, records: Iterator[WorkItem]) -> dict[str, tuple[WorkItem, ...]]:
-    """Reduce a WorkItem stream to the un-superseded heads per `id`.
-
-    The canonical order-independent reduction per
-    SPECIFICATION/contracts.md §"Materialized view": each entity's
-    heads are the records whose identity no sibling record's
-    `supersedes` pointer names, in ascending tie-break order
-    (`captured_at`, then per-record identity). A tuple longer than one
-    is concurrent divergence — representable and detectable, never
-    silently resolved here.
-    """
-    entries = ((work_item_record_identity(item=record), record) for record in records)
-    return _reduce_heads(entries=entries)
-
-
-def materialize_work_items(*, records: Iterator[WorkItem]) -> dict[str, WorkItem]:
-    """Reduce a WorkItem stream to the current-head-per-id dict.
-
-    The current head is the supersession-chain head; when an entity
-    has divergent heads the deterministic tie-break winner (greatest
-    `captured_at`, then greatest per-record identity) is returned.
-    Consumers that must DETECT divergence consume
-    `reduce_work_item_heads` directly.
-    """
-    return {
-        entity_id: heads[-1] for entity_id, heads in reduce_work_item_heads(records=records).items()
-    }
-
-
-def _record_identity(*, payload: dict[str, Any]) -> str:
-    canonical = json.dumps(payload, separators=(",", ":"), sort_keys=True)
-    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    return f"sha256:{digest}"
-
-
-def _reduce_heads(
-    *,
-    entries: Iterator[tuple[str, _RecordT]],
-) -> dict[str, tuple[_RecordT, ...]]:
-    groups: dict[str, dict[str, _RecordT]] = {}
-    for identity, record in entries:
-        groups.setdefault(record.id, {})[identity] = record
-    heads: dict[str, tuple[_RecordT, ...]] = {}
-    for entity_id, group in groups.items():
-        superseded = frozenset(
-            record.supersedes for record in group.values() if record.supersedes is not None
-        )
-        unsuperseded = {
-            identity: record for identity, record in group.items() if identity not in superseded
-        }
-        tie_break_order = sorted(
-            (record.captured_at, identity) for identity, record in unsuperseded.items()
-        )
-        heads[entity_id] = tuple(unsuperseded[identity] for _, identity in tie_break_order)
-    return heads
+# Static conformance assertion: pyright rejects this binding if
+# JsonlWorkItemStore stops satisfying the WorkItemStore Protocol.
+_: type[WorkItemStore] = JsonlWorkItemStore
 
 
 def _iter_records(*, path: Path) -> Iterator[tuple[int, dict[str, Any]]]:
