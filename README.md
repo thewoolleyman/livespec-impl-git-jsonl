@@ -19,7 +19,7 @@ implementation-plugin contract livespec publishes in
 [`livespec/SPECIFICATION/contracts.md`](https://github.com/thewoolleyman/livespec/blob/master/SPECIFICATION/contracts.md)
 §"Implementation-plugin contract — the 10-skill surface". Other
 realizations exist — notably
-[livespec-impl-beads](https://github.com/thewoolleyman/livespec-impl-beads),
+[livespec-orchestrator-beads-fabro](https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro),
 the family's current work-items backend. git-jsonl is not retired and
 is not the active family backend; it is the reference realization and
 the spec-side dogfood target, kept in lockstep with the livespec
