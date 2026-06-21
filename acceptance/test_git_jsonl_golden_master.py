@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from livespec_impl_git_jsonl.acceptance import (
+from livespec_orchestrator_git_jsonl.acceptance import (
     AcceptanceConfig,
     run_acceptance,
 )

@@ -32,7 +32,7 @@ livespec/SPECIFICATION/contracts.md §"Cross-boundary handoffs").
 Use the Spec Reader to load the current specification:
 
 ```python
-from livespec_impl_git_jsonl.spec_reader import read_current_specification
+from livespec_orchestrator_git_jsonl.spec_reader import read_current_specification
 from pathlib import Path
 
 snapshot = read_current_specification(spec_root=Path("SPECIFICATION"))

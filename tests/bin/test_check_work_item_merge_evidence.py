@@ -8,6 +8,6 @@ def test_check_work_item_merge_evidence_wrapper_threads_exit_code(
 ) -> None:
     wrapper_runner(
         "check_work_item_merge_evidence.py",
-        "livespec_impl_git_jsonl.checks.work_item_merge_evidence",
+        "livespec_orchestrator_git_jsonl.checks.work_item_merge_evidence",
         1,
     )

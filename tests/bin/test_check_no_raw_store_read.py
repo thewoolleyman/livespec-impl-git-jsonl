@@ -8,6 +8,6 @@ def test_check_no_raw_store_read_wrapper_threads_exit_code(
 ) -> None:
     wrapper_runner(
         "check_no_raw_store_read.py",
-        "livespec_impl_git_jsonl.checks.no_raw_store_read",
+        "livespec_orchestrator_git_jsonl.checks.no_raw_store_read",
         1,
     )

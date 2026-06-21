@@ -20,7 +20,7 @@ the load-bearing surfaces this skill composes.
   The shipped wrappers self-bootstrap this: `bin/_bootstrap.py` adds
   `scripts/` and `scripts/_vendor/` to `sys.path`, so each
   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bin/<name>.py"` invocation
-  resolves `livespec_impl_git_jsonl` and the vendored
+  resolves `livespec_orchestrator_git_jsonl` and the vendored
   `livespec_runtime` with no `uv` and no project venv.
 - The work-items JSONL store path is reachable (created on first
   append if absent).
@@ -116,9 +116,9 @@ hashing; shape `gap-<8-char-base32-suffix>`). Then:
 3. On confirm, append a new work-item JSONL record:
 
 ```python
-from livespec_impl_git_jsonl._ids import new_work_item_id
-from livespec_impl_git_jsonl.store import append_work_item
-from livespec_impl_git_jsonl.types import WorkItem
+from livespec_orchestrator_git_jsonl._ids import new_work_item_id
+from livespec_orchestrator_git_jsonl.store import append_work_item
+from livespec_orchestrator_git_jsonl.types import WorkItem
 from datetime import datetime, timezone
 from pathlib import Path
 
