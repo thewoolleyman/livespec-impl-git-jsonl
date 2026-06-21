@@ -280,7 +280,7 @@ check-coverage:
 # Orchestrator-private store-integrity checks (livespec-impl-git-
 # jsonl-private; v008 SPECIFICATION/contracts.md "Append-only store
 # disciplines"). Both consume the canonical reducer / query surface
-# in livespec_impl_git_jsonl.store — never a private re-derivation
+# in livespec_orchestrator_git_jsonl.store — never a private re-derivation
 # of "latest wins" (the one-canonical-reducer obligation).
 # ---------------------------------------------------------------
 

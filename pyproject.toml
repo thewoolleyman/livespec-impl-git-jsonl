@@ -62,7 +62,7 @@ dev = [
 # livespec-runtime is the shared runtime sibling library. This repo
 # consumes two of its packages: `livespec_runtime.cross_repo` (the
 # data-migration script under
-# `livespec_impl_git_jsonl.migration.depends_on_typed_form` uses its
+# `livespec_orchestrator_git_jsonl.migration.depends_on_typed_form` uses its
 # types module for the canonical typed-dict shape) and, since v0.4.0,
 # `livespec_runtime.work_items` (the shared WorkItem model + the
 # canonical PURE reducer THIS repo donated + the WorkItemStore
@@ -166,10 +166,10 @@ ban-relative-imports = "all"
 # "work_item_merge_evidence static check" / "Backfill for existing
 # closed work-items" — the same documented pattern as
 # dev-tooling/checks/ above.
-".claude-plugin/scripts/livespec_impl_git_jsonl/checks/work_item_merge_evidence.py" = [
+".claude-plugin/scripts/livespec_orchestrator_git_jsonl/checks/work_item_merge_evidence.py" = [
     "S603", "S607", "S404",
 ]
-".claude-plugin/scripts/livespec_impl_git_jsonl/migration/merge_evidence_backfill.py" = [
+".claude-plugin/scripts/livespec_orchestrator_git_jsonl/migration/merge_evidence_backfill.py" = [
     "S603", "S607", "S404",
 ]
 
@@ -247,12 +247,12 @@ exclude_also = [
 ]
 
 [tool.livespec_dev_tooling]
-source_trees = [".claude-plugin/scripts/livespec_impl_git_jsonl"]
-io_trees = [".claude-plugin/scripts/livespec_impl_git_jsonl/io"]
+source_trees = [".claude-plugin/scripts/livespec_orchestrator_git_jsonl"]
+io_trees = [".claude-plugin/scripts/livespec_orchestrator_git_jsonl/io"]
 commands_trees = [
-    ".claude-plugin/scripts/livespec_impl_git_jsonl/commands",
-    ".claude-plugin/scripts/livespec_impl_git_jsonl/checks",
-    ".claude-plugin/scripts/livespec_impl_git_jsonl/migration",
+    ".claude-plugin/scripts/livespec_orchestrator_git_jsonl/commands",
+    ".claude-plugin/scripts/livespec_orchestrator_git_jsonl/checks",
+    ".claude-plugin/scripts/livespec_orchestrator_git_jsonl/migration",
 ]
 # Repo-root-relative path prefixes the `tests_no_subprocess_spawn` check
 # (canonical, added in livespec-dev-tooling v0.14.1) exempts from its
@@ -262,5 +262,5 @@ commands_trees = [
 # already builds a fresh child env (PATH + PYTHONPATH only), so it inherits no
 # COVERAGE_PROCESS_START / COV_CORE_* and does not self-instrument.
 subprocess_spawn_allowlist = [
-    "tests/livespec_impl_git_jsonl/migration/test_merge_evidence_backfill.py",
+    "tests/livespec_orchestrator_git_jsonl/migration/test_merge_evidence_backfill.py",
 ]

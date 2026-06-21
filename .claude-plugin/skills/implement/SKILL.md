@@ -27,7 +27,7 @@ disposition` per livespec/SPECIFICATION/contracts.md
 If `<work-item-id>` was supplied, load it from the JSONL store:
 
 ```python
-from livespec_impl_git_jsonl.store import materialize_work_items, read_work_items
+from livespec_orchestrator_git_jsonl.store import materialize_work_items, read_work_items
 from pathlib import Path
 
 ix = materialize_work_items(read_work_items(path=Path("work-items.jsonl")))
@@ -119,8 +119,8 @@ the work. Populate it at closure time:
   administratively closed record must not carry merge-evidence.
 
 ```python
-from livespec_impl_git_jsonl.store import append_work_item, work_item_record_identity
-from livespec_impl_git_jsonl.types import AuditRecord, WorkItem
+from livespec_orchestrator_git_jsonl.store import append_work_item, work_item_record_identity
+from livespec_orchestrator_git_jsonl.types import AuditRecord, WorkItem
 from datetime import datetime, timezone
 from pathlib import Path
 
