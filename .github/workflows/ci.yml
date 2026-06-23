@@ -80,16 +80,16 @@ jobs:
           fi
 
       # `setup` is the change-detection GATE only — it deliberately does
-      # NO uv pre-warm. The matrix jobs `needs: setup`, so any work here
-      # sits on the critical path before check-coverage (the long pole)
-      # can start. Each matrix job restores ~/.cache/uv itself (keyed on
-      # uv.lock, with the `uv-${{ runner.os }}-` prefix restore-key) and
-      # runs its own `uv sync`, so on the common unchanged-lock run the
-      # cache already exists and every job restores it in parallel with no
-      # PyPI fetch. A serial pre-warm here would only help the first run
-      # after a lock change — and the prefix restore-key already bounds
-      # that to the delta wheels — so it is not worth taxing every run's
-      # wall-clock. See livespec-dev-tooling-7us.10 (mirrors livespec #487).
+      # NO uv pre-warm. The check-python matrix jobs `needs: setup`, so
+      # any work here sits on the critical path before the matrix can
+      # start. Each matrix job restores ~/.cache/uv itself (keyed on
+      # uv.lock, with the `uv-${{ runner.os }}-` prefix
+      # restore-key) and runs its own `uv sync`, so on the common
+      # unchanged-lock run the cache already exists and every job
+      # restores it in parallel with no PyPI fetch. A serial pre-warm
+      # here would only help the first run after a lock change — and the
+      # prefix restore-key already bounds that to the delta wheels — so
+      # it is not worth taxing every run's wall-clock.
 
   check-python:
     name: ${{ matrix.target }}
@@ -292,6 +292,14 @@ jobs:
       - name: Run golden-master acceptance harness
         run: just acceptance
 
+  # Closed-loop CI telemetry: export this run's per-job timings to Honeycomb
+  # (dataset github-ci) and FAIL if Honeycomb does not accept them, so a broken
+  # telemetry pipeline reddens master CI instead of dying silently. Master/
+  # merge_group only (PRs untouched, no added latency). REQUIRES the repo secret
+  # HONEYCOMB_GITHUB_CI_INGEST_KEY_LIVESPEC (the livespec-family write-only
+  # ingest key). A freshly generated livespec-orchestrator-git-jsonl fails this job on its
+  # first master run until that secret is added — add it, or delete this job if
+  # livespec-orchestrator-git-jsonl does not send CI telemetry to Honeycomb.
   export-telemetry:
     name: export-telemetry
     needs: [setup, check-python, check-metadata, e2e-cli, acceptance]
@@ -303,6 +311,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Export CI run telemetry to Honeycomb (closed-loop verified)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
