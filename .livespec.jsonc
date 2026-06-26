@@ -12,6 +12,10 @@
   "template": "livespec",
   "spec_root": "SPECIFICATION",
   "implementation": { "plugin": "livespec-orchestrator-beads-fabro" },
+  "harnesses": {
+    "claude": { "status": "supported", "canonical_command": "livespec-orchestrator-git-jsonl:next" },
+    "codex":  { "status": "supported", "canonical_command": "livespec-orchestrator-git-jsonl:next" }
+  },
   "livespec-orchestrator-beads-fabro": {
     "format": "beads",
     "compat": { "livespec": ">=0.1.0,<1.0.0", "pinned": "v0.4.0" },
