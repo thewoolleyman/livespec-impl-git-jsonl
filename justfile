@@ -42,33 +42,144 @@ acceptance:
     uv run pytest acceptance -q
 
 # ---------------------------------------------------------------
+# Worktree-discipline recipes (the Worktree Discipline Pack).
+#
+# These four recipes drive the worktree lifecycle through `just` — the
+# mandated runner — by calling the portable, ecosystem-neutral worktree core
+# (dev-tooling/worktree-lib.sh) DIRECTLY. The CORE is the single source of
+# truth for the lifecycle (create / hydrate / land / reap) and the
+# primary-vs-linked detection; these recipes carry NO logic of their own —
+# they only forward arguments. `just` and `lefthook` are mandated
+# non-functionally across the fleet + adopters (the Conformance Pattern:
+# Installer = a `just` recipe; commit gate wired via `lefthook → just check`);
+# they never enter livespec core's public functional surface or the
+# /livespec:* skills. Where this repo's ecosystem (python) has a
+# native tool, expose it as a STRICT PASS-THROUGH wrapper onto these recipes —
+# never an alternative runner: e.g. rust `cargo xtask worktree create` →
+# `just worktree-create`; javascript package.json
+# `"wt:create": "just worktree-create"`. Keeping the logic in the core — not
+# in any wrapper — is what stops ecosystems from drifting; the drift workflow
+# + `copier update` exist to catch any divergence.
+#
+# Hydration is the python-profile specialization in
+# dev-tooling/worktree-hydrate.sh, which the core's `create`/`hydrate` verbs
+# invoke automatically.
+# ---------------------------------------------------------------
+
+# Branch a fresh isolated worktree from the default branch under
+# ~/.worktrees/livespec-orchestrator-git-jsonl/{{branch}} and hydrate it (python profile).
+worktree-create branch base_ref="":
+    ./dev-tooling/worktree-lib.sh create {{branch}} {{base_ref}}
+
+# Run the python-profile hydrate hook in the current worktree.
+worktree-hydrate:
+    ./dev-tooling/worktree-lib.sh hydrate
+
+# Rebase the current worktree branch onto the latest base, then report the
+# next landing step (land_mode=pr; the core never auto-pushes).
+worktree-land base_ref="":
+    ./dev-tooling/worktree-lib.sh land {{base_ref}}
+
+# Report (dry-run) or remove (--execute) stale/orphaned worktrees. Pass
+# extra args through, e.g. `just worktree-reap --execute`.
+worktree-reap *args:
+    ./dev-tooling/worktree-lib.sh reap {{args}}
+
+# ---------------------------------------------------------------
+# Server-side worktree discipline: GitHub branch protection.
+#
+# The local commit-refuse hook (the structural git-hook-wrapper.sh body
+# installed at .git/hooks) blocks commits on the primary checkout, but it is
+# LOCALLY BYPASSABLE (`--no-verify`, or simply never installed). Branch
+# protection is
+# the server-enforced backstop: the default branch advances only via PR/merge;
+# direct + force pushes are rejected by GitHub itself. Both recipes delegate to
+# the portable, ecosystem-neutral dev-tooling/branch-protection.sh (the single
+# source of truth) — `just` is the mandated runner and the recipes carry no
+# logic of their own, exactly like the worktree-* recipes above.
+#
+# `protect-default-branch` (the INSTALLER) establishes baseline protection on a
+# fresh repo (requires an admin-scoped gh token); it is idempotent and
+# non-weakening — it leaves an existing, possibly richer, protection untouched
+# unless FORCE=1. `check-branch-protection` (the VERIFIER / "tripwire") asserts
+# protection is present and is fail-closed, but capability-aware: it SKIPs with
+# a NAMED notice when it cannot read protection (no gh / no admin token /
+# non-GitHub origin) so it never makes `just check` flaky, and honours the
+# LIVESPEC_BRANCH_PROTECTION_CHECK severity lever (fail [default] | warn | skip).
+# The authoritative bite belongs to the Fleet-time conformance/orchestrator
+# tier, where an admin token exists.
+# ---------------------------------------------------------------
+
+# Establish baseline GitHub branch protection on the default branch (requires an
+# admin-scoped gh token). Idempotent + non-weakening; FORCE=1 resets to baseline.
+protect-default-branch:
+    ./dev-tooling/branch-protection.sh apply
+
+# Verify the default branch is protected (the server-side tripwire). Fail-closed
+# but capability-aware; tune via LIVESPEC_BRANCH_PROTECTION_CHECK=fail|warn|skip.
+check-branch-protection:
+    ./dev-tooling/branch-protection.sh check
+
+# ---------------------------------------------------------------
 # First-time setup.
 # ---------------------------------------------------------------
 
+# Install the canonical structural commit-refuse hook body (the
+# repo-tracked dev-tooling/git-hook-wrapper.sh) as the pre-commit,
+# pre-push, and commit-msg hooks. This is the Installer slot of the
+# Worktree-discipline concern (the Conformance Pattern: Installer = a
+# `just` recipe; commit gate wired via lefthook → just check) — a
+# shared, idempotent recipe `bootstrap` delegates to. The body refuses
+# commits/pushes STRUCTURALLY: it exits 1 when `git rev-parse --git-dir`
+# equals `git rev-parse --git-common-dir` (a real primary checkout; a
+# secondary worktree's git-dir is `.git/worktrees/<name>` and so differs)
+# UNLESS `git config livespec.sandboxExempt` is `true`. There is therefore
+# NO arming step and so no fail-open window — the hook is armed the moment
+# it is installed. At worktrees (and in declared-exempt Fabro sandboxes)
+# the body delegates to mise-managed lefthook so the per-hook gates fire;
+# `--no-auto-install` inside the body is load-bearing (without it lefthook
+# backs the wrapper up to `<name>.old` on every fire and replaces it with
+# its PATH-searching stub, which both silently no-ops in Claude Code's bash
+# AND defeats the commit-refuse invariant).
+#
+# Resolves the shared hooks dir via git-common-dir so the install lands
+# correctly whether invoked from the primary checkout or a secondary
+# worktree (where .git is a file and `mkdir -p .git/hooks` would fail).
+# Idempotent: re-running overwrites with the same canonical body.
+install-commit-refuse-hooks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    hooks_dir="$(realpath "$(git rev-parse --git-common-dir)")/hooks"
+    mkdir -p "${hooks_dir}"
+    cp dev-tooling/git-hook-wrapper.sh "${hooks_dir}/pre-commit"
+    cp dev-tooling/git-hook-wrapper.sh "${hooks_dir}/pre-push"
+    cp dev-tooling/git-hook-wrapper.sh "${hooks_dir}/commit-msg"
+    chmod +x "${hooks_dir}/pre-commit" "${hooks_dir}/pre-push" "${hooks_dir}/commit-msg"
+
 bootstrap:
-    # Idempotent `livespec.primaryPath` on the primary checkout's
-    # git-common-dir config (per livespec/SPECIFICATION/
-    # non-functional-requirements.md §"Primary-checkout commit-refuse
-    # hook" / §"Commit-refuse hook bootstrap procedure" — family-wide
-    # invariant inherited by every livespec-impl-* sibling). The
-    # commit-refuse hook reads this config value to recognize the
-    # primary checkout and refuse commits/pushes there, forcing every
-    # edit through `git worktree add`. Targets the absolute path of
-    # the git common dir's parent so the recipe writes the right
-    # value when invoked from the primary checkout AND from secondary
-    # worktrees.
-    git config --file "$(git rev-parse --git-common-dir)/config" livespec.primaryPath "$(realpath "$(dirname "$(git rev-parse --git-common-dir)")")"
-    # Install the commit-refuse hook (vendored from livespec-dev-
-    # tooling v0.5.0 — see dev-tooling/livespec-commit-refuse-hook.sh)
-    # at pre-commit AND pre-push. Refuses at the primary checkout;
-    # delegates to lefthook at secondary worktrees via mise. The
-    # commit-msg path keeps the legacy git-hook-wrapper since it
-    # routes argv[1] to the v034 D3 replay-hook stage.
-    mkdir -p .git/hooks
-    cp dev-tooling/livespec-commit-refuse-hook.sh .git/hooks/pre-commit
-    cp dev-tooling/livespec-commit-refuse-hook.sh .git/hooks/pre-push
-    cp dev-tooling/git-hook-wrapper.sh .git/hooks/commit-msg
-    chmod +x .git/hooks/pre-commit .git/hooks/pre-push .git/hooks/commit-msg
+    #!/usr/bin/env bash
+    # Shebang recipe: the whole body runs in ONE bash process, so the indented
+    # `if` block below is valid. A plain (non-shebang) recipe runs each line as
+    # its own command and `just` REJECTS the extra-indented `if`-body lines
+    # ("Recipe line has extra leading whitespace") — which made the rendered
+    # justfile fail to parse, breaking every `just` command for a freshly
+    # scaffolded or `copier update`-d consumer. Matches the other multi-line
+    # recipes (check, check-pre-commit, ensure-codex-plugins).
+    set -euo pipefail
+    # Install the structural commit-refuse hook body as the pre-commit,
+    # pre-push, and commit-msg hooks via the shared install recipe — the
+    # single Installer slot of the Worktree-discipline concern. The body
+    # refuses commits/pushes on the primary checkout (armed on install;
+    # no arming step), honours `livespec.sandboxExempt`, and otherwise
+    # delegates to mise-managed lefthook so commit-msg argv[1] reaches the
+    # red-green-replay stage regardless of the user's shell config.
+    just install-commit-refuse-hooks
+    # Ensure the worktree-discipline shell scripts stay executable.
+    # copier preserves the executable bit on a fresh `copier copy`, but a
+    # `copier update` 3-way merge can re-checkout these files without it,
+    # and the worktree-* recipes invoke them directly (./…) — a
+    # non-executable helper would silently no-op. This chmod is idempotent.
+    chmod +x dev-tooling/worktree-lib.sh dev-tooling/worktree-hydrate.sh dev-tooling/branch-protection.sh
     # Harden the beads tenant-pointer dir to owner-only on first-touch (bd
     # recommends 0700; only the owning user's bd reads it — the Dolt server
     # connects over TCP and never reads this dir). Guarded: repos with no beads
@@ -285,6 +396,16 @@ check:
             failed+=("$t")
         fi
     done
+    # Worktree Discipline Pack — server-side branch-protection tripwire. Run as
+    # a direct step rather than a canonical-slug target because it reads
+    # external GitHub state, not the source tree. Capability-aware: it SKIPs
+    # with a named notice when it cannot read protection (no gh / no admin
+    # token / non-GitHub origin), so it never makes `just check` flaky; it is
+    # fail-closed where it CAN read (honouring LIVESPEC_BRANCH_PROTECTION_CHECK).
+    printf '\n::: branch-protection (server-side worktree-discipline tripwire)\n'
+    if ! ./dev-tooling/branch-protection.sh check; then
+        failed+=("branch-protection")
+    fi
     if [[ ${#failed[@]} -gt 0 ]]; then
         printf '\nFailed targets (%d):\n' "${#failed[@]}"
         printf '  - %s\n' "${failed[@]}"

@@ -5,10 +5,26 @@
 # publishes a new release.
 #
 # Authority: livespec/SPECIFICATION/contracts.md
-#   §"Pre-commit step ordering" — pre-commit runs three commands in
-#   order (00-lint-autofix-staged, 01-commit-pairs-source-and-test,
-#   02-check-pre-commit); commit-msg runs no-commit-on-master then
-#   red-green-replay (v034 D3); pre-push runs the full aggregate.
+#   §"Pre-commit step ordering" — pre-commit runs three commands in order
+#   (00-lint-autofix-staged, 01-commit-pairs-source-and-test,
+#   02-check-pre-commit); commit-msg runs red-green-replay; pre-push runs the
+#   full aggregate. Earlier steps fail-fast so a missing test pair surfaces
+#   without waiting for pytest.
+#
+# Worktree-discipline gate: the worktree-only repository mutation protocol (see
+# AGENTS.md §"Repository mutation protocol") is enforced by the STRUCTURAL
+# commit-refuse hook — the `dev-tooling/git-hook-wrapper.sh` body that
+# `just bootstrap` installs (via `just install-commit-refuse-hooks`) at
+# .git/hooks/pre-commit, .git/hooks/pre-push, and .git/hooks/commit-msg. That
+# body refuses a commit/push on the PRIMARY checkout (exit 1 when
+# `git rev-parse --git-dir` equals `git rev-parse --git-common-dir`; a linked
+# worktree's git-dir is `.git/worktrees/<name>` and so differs) UNLESS
+# `git config livespec.sandboxExempt` is `true`, then delegates to mise-managed
+# lefthook so the gates below fire. It is armed on install — there is no
+# `livespec.primaryPath` arming step and so no fail-open window — and it WRAPS
+# lefthook rather than being a lefthook job. The commit-msg install covers
+# `git commit --allow-empty` (which lefthook v2 skips at pre-commit when there
+# are zero staged files), so no separate lefthook backstop is needed.
 #
 # Authority: livespec/SPECIFICATION/non-functional-requirements.md
 #   §"Toolchain pins" — `run:` fields MUST delegate to `just <target>`
@@ -18,10 +34,10 @@
 #
 # Activation: `just bootstrap` installs the git-hook-wrapper from
 # dev-tooling/git-hook-wrapper.sh into .git/hooks/pre-commit,
-# .git/hooks/pre-push, and .git/hooks/commit-msg. The wrapper
-# invokes `mise exec lefthook -- lefthook run <hook-name> "$@"` so
-# the gate fires regardless of shell config and commit-msg argv[1]
-# (the commit-message file path) reaches the red-green-replay hook.
+# .git/hooks/pre-push, and .git/hooks/commit-msg. The wrapper invokes
+# `mise exec -- lefthook run --no-auto-install <hook-name> "$@"` so the gates
+# fire regardless of shell config and commit-msg argv[1] (the commit-message
+# file path) reaches the red-green-replay hook.
 
 pre-commit:
   commands:
@@ -34,15 +50,7 @@ pre-commit:
 
 commit-msg:
   commands:
-    00-no-commit-on-master:
-      run: |
-        branch=$(git rev-parse --abbrev-ref HEAD)
-        if [ "$branch" = "master" ]; then
-          printf 'ERROR: direct commits to master are forbidden; create a feature branch first\n' >&2
-          printf 'Hint: git checkout -b <branch-name>\n' >&2
-          exit 1
-        fi
-    01-red-green-replay:
+    00-red-green-replay:
       run: just check-red-green-replay {1}
 
 pre-push:
