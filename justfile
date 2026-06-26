@@ -297,7 +297,8 @@ check:
     export UV_NO_SYNC=1
     read -ra skip_targets <<< "{{skip}}"
     targets=(
-        # ---- Canonical block (39 slugs, alphabetical) ----
+        # ---- Canonical block (41 slugs, alphabetical) ----
+        check-agents-ai-references-resolve
         check-aggregate-completeness
         check-all-declared
         check-assert-never-exhaustiveness
@@ -326,6 +327,7 @@ check:
         check-no-write-direct
         check-pbt-coverage-pure-modules
         check-per-file-coverage
+        check-plugin-resolution
         check-primary-checkout-commit-refuse-hook-installed
         check-private-calls
         check-public-api-result-typed
@@ -497,6 +499,13 @@ check-work-item-merge-evidence:
 # Canonical structural checks (shared from livespec-dev-tooling).
 # Wired in alphabetical order to match the aggregate above.
 # ---------------------------------------------------------------
+
+# AGENTS.md `.ai/<topic>.md` reference-resolution static check
+# (livespec core §"Fleet agent-instruction core"): every `.ai/`
+# reference in AGENTS.md must resolve to an existing file. Canonical
+# since livespec-dev-tooling v0.21; wired here at the v0.21.2 bump.
+check-agents-ai-references-resolve:
+    uv run python -m livespec_dev_tooling.checks.agents_ai_references_resolve
 
 # In-repo gate for the wiring-completeness invariant
 # (SPECIFICATION/contracts.md v094 §"Shared code sync —
@@ -720,6 +729,12 @@ check-per-file-coverage:
     # explicitly so the vendored-tree exclusion takes effect.
     uv run pytest -n auto --cov --cov-branch --cov-config=pyproject.toml --cov-report=term-missing
     uv run python -m livespec_dev_tooling.checks.per_file_coverage
+
+# Shared baseline plugin-resolution Verifier (Conformance-Pattern,
+# livespec-zs22.7.7 M6). The check is shipped by livespec-dev-tooling;
+# this recipe is the project-root-scoped CI/just-check adoption.
+check-plugin-resolution:
+    uv run python -m livespec_dev_tooling.checks.plugin_resolution
 
 # Family-wide commit-refuse hook invariant per livespec/SPECIFICATION/
 # non-functional-requirements.md §"Primary-checkout commit-refuse hook"
