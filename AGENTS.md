@@ -8,43 +8,131 @@ the impl-plugin template); repo-specific guidance is additive on top.
 
 ## Repository mutation protocol
 
-Every repo change uses a worktree → PR → merge → cleanup path. Treat leaving
-dirty state, committing on the primary checkout, or asking the user whether to
-commit as failures of the workflow, not as acceptable stopping points.
+**Every change to a tracked file happens in an ISOLATED git worktree under
+`~/.worktrees/<repo>/<branch>`, never on the shared primary checkout's working
+tree.** Multiple agent sessions share the one primary checkout; committing
+directly on it causes cross-track collisions (one session's uncommitted churn
+breaks another's gates), orphaned worktrees, and detached-HEAD incidents.
+Leaving the primary dirty, committing on it, orphaning a worktree, or asking
+the user whether to commit are workflow failures — not acceptable stopping
+points.
 
-1. Confirm the primary checkout before editing:
+This rule is **mechanically enforced** by the STRUCTURAL commit-refuse hook —
+the `dev-tooling/git-hook-wrapper.sh` body that `just bootstrap` installs (via
+`just install-commit-refuse-hooks`) at `.git/hooks/pre-commit`,
+`.git/hooks/pre-push`, and `.git/hooks/commit-msg`. It blocks any `git commit`
+or `git push` made on the primary checkout UNLESS `git config
+livespec.sandboxExempt` is `true` (the explicit, declared exemption a Fabro
+sandbox — a fresh full clone that is structurally a primary but legitimately
+commits during Red-Green-Replay — sets on itself), then delegates to
+mise-managed lefthook so the per-hook gates still fire. Linked worktrees pass —
+the hook distinguishes primary from linked with portable, config-free
+detection: `git rev-parse --git-dir` and `--git-common-dir` resolve to the SAME
+path on the primary (refuse) and DIFFER in a linked worktree (the git-dir is
+`.git/worktrees/<name>`; allow). It is armed on install — there is no arming
+step and so no fail-open window — and needs no `git config` key beyond the
+`livespec.sandboxExempt` exemption marker; the commit-msg install covers
+`git commit --allow-empty`, which lefthook skips at pre-commit when there are
+zero staged files.
+
+The portable worktree-lifecycle helper `dev-tooling/worktree-lib.sh` carries
+the four verbs the discipline needs — `create`, `hydrate`, `land`, `reap` —
+and uses the same primary-vs-linked test as the gate. It is pure-git and
+ecosystem-neutral (it shells out to `git` only).
+
+Drive the four verbs through `just` — the mandated runner. The `just
+worktree-create` / `worktree-hydrate` / `worktree-land` / `worktree-reap`
+recipes call `dev-tooling/worktree-lib.sh` directly and carry no logic of
+their own; the core stays the single source of truth. `just` and `lefthook`
+are mandated non-functionally across the fleet + adopters (the Conformance
+Pattern: Installer = a `just` recipe; commit gate wired via `lefthook → just
+check`) and never enter livespec core's public functional surface or the
+`/livespec:*` skills. If this repo's ecosystem has a native tool, expose it as
+a STRICT PASS-THROUGH onto these recipes — never an alternative runner: a Rust
+repo wires `cargo xtask worktree create` → `just worktree-create`; a
+JavaScript repo wires package.json `"wt:create": "just worktree-create"`.
+
+1. **Create the worktree.** Branch from the latest default branch into a
+   dedicated worktree under `~/.worktrees/<repo>/<branch>` (NEVER as a peer of
+   first-class clones):
 
    ```bash
-   git config --get livespec.primaryPath
-   git status --short --branch
+   ./dev-tooling/worktree-lib.sh create <branch>
+   cd ~/.worktrees/<repo>/<branch>
    ```
 
-2. If the change will modify tracked files, create a dedicated worktree from the
-   primary checkout's `master` and do all edits there. Every worktree lives under
-   the per-user root `~/.worktrees/<repo>/<branch>` — NEVER as a peer of the
-   clones under `/data/projects`, so the workspace holds only first-class clones:
-
-   ```bash
-   mise exec -- git worktree add -b <branch> "$HOME/.worktrees/livespec-orchestrator-git-jsonl/<branch>" master
-   ```
-
-   `just bootstrap` registers `~/.worktrees` as one of mise's
+   `worktree-lib.sh create` fetches `origin`, adds the worktree, and runs the
+   hydrate hook. `just bootstrap` registers `~/.worktrees` as one of mise's
    `trusted_config_paths`, so a freshly created worktree's `.mise.toml` is
-   auto-trusted and the first `mise exec` inside it never stalls on a "config not
-   trusted" prompt.
+   auto-trusted and the first `mise exec` inside it never stalls on a "config
+   not trusted" prompt.
 
-3. Use `mise exec -- git commit ...` and `mise exec -- git push ...` so the
-   mise-managed lefthook hooks actually run. Never pass `--no-verify`; if a hook
-   fails, fix the cause or halt with the failure.
-4. Open a PR, wait for required checks, and merge through the PR using the repo's
-   rebase-merge discipline.
-5. After merge, refresh the primary checkout to `origin/master`, remove the
-   feature worktree, delete the local branch, and verify the primary checkout is
-   clean on `master`.
+2. **Hydrate (if this repo needs it).** "Hydrate" means prepare the fresh
+   worktree so the repo's checks and tooling can run inside it; what that
+   entails is ecosystem-specific (Python: create a `.venv`; JavaScript:
+   populate `node_modules` including workspace sub-packages; Rust: warm/share
+   the build cache — crates already live in `$CARGO_HOME`, so the per-worktree
+   cost is the cold `target/` recompile, shared via sccache or a shared
+   `CARGO_TARGET_DIR`). The shipped `dev-tooling/worktree-hydrate.sh` is the
+   ecosystem-correct hydration the copier template stamped from this repo's
+   `ecosystem` answer — adjust its `hydrate_cmd` if this repo's installer
+   differs, or override at runtime via `WORKTREE_HYDRATE_OVERRIDE="<command>"`
+   (just the dependency step) or `WORKTREE_HYDRATE_HOOK="<command>"` (the whole
+   hook). `worktree-lib.sh create` runs the hook automatically; re-run it
+   standalone with `./dev-tooling/worktree-lib.sh hydrate`.
+
+3. **Edit and commit in the worktree.** Use `mise exec -- git commit ...` and
+   `mise exec -- git push ...` so the mise-managed lefthook hooks actually run.
+   Never pass `--no-verify`; if a hook fails, fix the cause or halt with the
+   failure.
+
+4. **Land the branch.** Rebase onto the latest default branch, then land via
+   this repo's chosen path (PR/merge, merge-queue, or direct push — the
+   contract is mandated, the land tool is not):
+
+   ```bash
+   ./dev-tooling/worktree-lib.sh land   # fetch + rebase, then reports the next step
+   ```
+
+5. **Clean up (always — leaving an orphan is a failure).** After the branch
+   lands, refresh the primary to the latest default branch, then reap the
+   worktree:
+
+   ```bash
+   ./dev-tooling/worktree-lib.sh reap                 # dry-run (default): reports the plan
+   ./dev-tooling/worktree-lib.sh reap --execute       # remove merged + clean worktrees
+   ```
+
+   `reap` never touches the primary checkout or the worktree it runs from, and
+   never removes a dirty or unmerged worktree without `--force`. NEVER run it
+   while another agent is actively working in a worktree — `--force` discards
+   uncommitted changes. Reap only at session start, after a landed branch is
+   confirmed merged and its agent exited, or at loop end.
 
 Do not leave orphaned worktrees. If a session must stop before cleanup, record
 the active worktree path, branch, PR, validation state, and next action in the
 relevant handoff document.
+
+### Server-side enforcement (branch protection)
+
+The local commit-refuse hook is LOCALLY bypassable (`git commit --no-verify`,
+or simply never installed). GitHub branch protection is the server-enforced
+backstop: the default branch advances only via PR/merge, and
+direct + force pushes to it are rejected by GitHub itself. Establish it once on
+a fresh repo (needs an admin-scoped `gh` token):
+
+```bash
+just protect-default-branch   # idempotent + non-weakening; FORCE=1 resets to baseline
+```
+
+`just check-branch-protection` is the VERIFIER (the "tripwire"): fail-closed
+when it can read protection, but capability-aware — it SKIPs with a named notice
+when it cannot (no `gh`, no admin token, or a non-GitHub origin), so it never
+makes `just check` flaky. It is wired into `just check` and honours the
+`LIVESPEC_BRANCH_PROTECTION_CHECK` severity lever (`fail` [default] | `warn` |
+`skip`) — the explicit, declared exemption. The authoritative bite belongs to
+the conformance/orchestrator tier, where an admin token exists. Both verbs
+delegate to the portable `dev-tooling/branch-protection.sh`.
 
 ## Agent prerequisites for plugin work
 
@@ -152,10 +240,20 @@ around the seam with raw `mysql` / `dolt` / `sudo`.
 
 ## Daily commands
 
-- `just bootstrap` — first-touch setup on a fresh clone; idempotently sets
-  `livespec.primaryPath`, installs the canonical commit-refuse hook at
-  `.git/hooks/pre-commit` + `.git/hooks/pre-push`, installs lefthook hooks, and
-  resolves plugin dependencies.
+- `just bootstrap` — first-touch setup on a fresh clone; idempotently installs
+  the structural commit-refuse hook (the `dev-tooling/git-hook-wrapper.sh` body,
+  via `just install-commit-refuse-hooks`) at `.git/hooks/pre-commit` +
+  `.git/hooks/pre-push` + `.git/hooks/commit-msg`, ensures the
+  worktree-discipline shell scripts (`dev-tooling/worktree-lib.sh`,
+  `dev-tooling/worktree-hydrate.sh`, `dev-tooling/branch-protection.sh`) stay
+  executable, installs lefthook hooks, resolves plugin dependencies, creates
+  `~/.worktrees`, and registers it in mise's `trusted_config_paths` so every
+  worktree (created at `~/.worktrees/<repo>/<branch>`) auto-trusts its
+  `.mise.toml`. The worktree-only mutation protocol is enforced by that hook
+  body, which refuses a commit/push on the primary checkout (armed on install;
+  honours `livespec.sandboxExempt`) and otherwise delegates to mise-managed
+  lefthook (commit on the primary checkout → blocked; linked worktrees →
+  allowed).
 - `just check` — the full enforcement aggregate (lint, types, tests, coverage,
   AST checks). It is the load-bearing safety net; it runs locally, in pre-push,
   and in CI.
