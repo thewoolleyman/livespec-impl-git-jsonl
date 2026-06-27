@@ -44,16 +44,20 @@ acceptance:
 # ---------------------------------------------------------------
 # Worktree-discipline recipes (the Worktree Discipline Pack).
 #
-# These four recipes drive the worktree lifecycle through `just` — the
-# mandated runner — by calling the portable, ecosystem-neutral worktree core
-# (dev-tooling/worktree-lib.sh) DIRECTLY. The CORE is the single source of
-# truth for the lifecycle (create / hydrate / land / reap) and the
-# primary-vs-linked detection; these recipes carry NO logic of their own —
-# they only forward arguments. `just` and `lefthook` are mandated
-# non-functionally across the fleet + adopters (the Conformance Pattern:
-# Installer = a `just` recipe; commit gate wired via `lefthook → just check`);
-# they never enter livespec core's public functional surface or the
-# /livespec:* skills. Where this repo's ecosystem (python) has a
+# The four `just worktree-{create,hydrate,land,reap}` lifecycle recipes are
+# SINGLE-SOURCED from the livespec-dev-tooling package's canonical
+# `worktree.just` fragment, installed into `dev-tooling/worktree.just` by
+# `just install-worktree-pack` (run from `bootstrap` and CI) and IMPORTED
+# here — so this repo no longer copies the recipe text into its own justfile.
+# The recipes are ecosystem-neutral one-line pass-throughs onto the portable,
+# ecosystem-neutral worktree core (dev-tooling/worktree-lib.sh), which they
+# call DIRECTLY. The CORE is the single source of truth for the lifecycle
+# (create / hydrate / land / reap) and the primary-vs-linked detection; the
+# recipes carry NO logic of their own — they only forward arguments. `just`
+# and `lefthook` are mandated non-functionally across the fleet + adopters
+# (the Conformance Pattern: Installer = a `just` recipe; commit gate wired via
+# `lefthook → just check`); they never enter livespec core's public functional
+# surface or the /livespec:* skills. Where this repo's ecosystem (python) has a
 # native tool, expose it as a STRICT PASS-THROUGH wrapper onto these recipes —
 # never an alternative runner: e.g. rust `cargo xtask worktree create` →
 # `just worktree-create`; javascript package.json
@@ -64,26 +68,18 @@ acceptance:
 # Hydration is the python-profile specialization in
 # dev-tooling/worktree-hydrate.sh, which the core's `create`/`hydrate` verbs
 # invoke automatically.
+#
+# OPTIONAL import (`import?`, NOT plain `import`): `dev-tooling/worktree.just`
+# is gitignored + installed (written by `install-worktree-pack`, never
+# tracked-committed), so it is ABSENT in a fresh clone until `just bootstrap`
+# runs. A plain `import` of a missing file makes `just` fail to parse the
+# ENTIRE justfile — which would brick `just bootstrap` on a fresh clone. The
+# optional `import?` silently no-ops while the file is absent (the worktree-*
+# recipes simply aren't available until `install-worktree-pack` materializes
+# the fragment) and resolves once installed.
 # ---------------------------------------------------------------
 
-# Branch a fresh isolated worktree from the default branch under
-# ~/.worktrees/livespec-orchestrator-git-jsonl/{{branch}} and hydrate it (python profile).
-worktree-create branch base_ref="":
-    ./dev-tooling/worktree-lib.sh create {{branch}} {{base_ref}}
-
-# Run the python-profile hydrate hook in the current worktree.
-worktree-hydrate:
-    ./dev-tooling/worktree-lib.sh hydrate
-
-# Rebase the current worktree branch onto the latest base, then report the
-# next landing step (land_mode=pr; the core never auto-pushes).
-worktree-land base_ref="":
-    ./dev-tooling/worktree-lib.sh land {{base_ref}}
-
-# Report (dry-run) or remove (--execute) stale/orphaned worktrees. Pass
-# extra args through, e.g. `just worktree-reap --execute`.
-worktree-reap *args:
-    ./dev-tooling/worktree-lib.sh reap {{args}}
+import? 'dev-tooling/worktree.just'
 
 # ---------------------------------------------------------------
 # Server-side worktree discipline: GitHub branch protection.
