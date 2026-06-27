@@ -1,28 +1,30 @@
 # dev-tooling/
 
-Standalone git-hook + worktree-discipline shell scripts installed by
-`just bootstrap` (the commit-refuse hook via `just
-install-commit-refuse-hooks`) into `.git/hooks/`. Unlike the `livespec`
-repo, this plugin does NOT host its own Python enforcement checks here
-— the shared checks live in the vendored `livespec_dev_tooling`
-package and are invoked through the `mise exec -- just check-*` targets
-in the `justfile`.
+Standalone worktree-discipline shell scripts plus the commit-refuse hook
+installer wiring used by `just bootstrap`. The commit-refuse hook is NOT a
+repo-vendored copy: `just install-commit-refuse-hooks` REUSES the shared
+`livespec_dev_tooling` installer module (the SINGLE source of the structural
+hook body) to write `.git/hooks/`. Unlike the `livespec` repo, this plugin does
+NOT host its own Python enforcement checks here — the shared checks live in the
+`livespec_dev_tooling` package and are invoked through the `mise exec -- just
+check-*` targets in the `justfile`.
 
-- `git-hook-wrapper.sh` — the structural commit-refuse hook installed
-  at `.git/hooks/pre-commit`, `.git/hooks/pre-push`, AND
-  `.git/hooks/commit-msg`. It refuses commits/pushes at the primary
-  checkout STRUCTURALLY (when `git rev-parse --git-dir` equals `git
-  rev-parse --git-common-dir`) — armed on install, with no
-  `livespec.primaryPath` arming step and so no fail-open window — then
-  delegates to mise-managed lefthook at secondary worktrees (and in
-  declared-exempt Fabro sandboxes that set `git config
-  livespec.sandboxExempt true`) via `mise exec -- lefthook run
-  --no-auto-install "$HOOK_NAME"`. The basename of `$0` selects which
-  hook's command list fires from `lefthook.yml`. The doctor invariant
-  `primary-checkout-commit-refuse-hook-installed` recognizes its
-  fingerprint — the marker comment `# livespec commit-refuse hook` + a
-  `git rev-parse --git-common-dir` invocation + an `exit 1` branch —
-  via substring match.
+- commit-refuse hook — installed at `.git/hooks/pre-commit`,
+  `.git/hooks/pre-push`, AND `.git/hooks/commit-msg` by `just
+  install-commit-refuse-hooks`, which runs `python -m
+  livespec_dev_tooling.install_commit_refuse_hooks` from the shared package — the
+  SINGLE source of the canonical body (no `git-hook-wrapper.sh` copy lives in
+  this repo). The installed body refuses commits/pushes at the primary checkout
+  STRUCTURALLY (when `git rev-parse --git-dir` equals `git rev-parse
+  --git-common-dir`) — armed on install, with no `livespec.primaryPath` arming
+  step and so no fail-open window — then delegates to mise-managed lefthook at
+  secondary worktrees (and in declared-exempt Fabro sandboxes that set `git
+  config livespec.sandboxExempt true`) via `mise exec -- lefthook run
+  --no-auto-install "$HOOK_NAME"`. The basename of `$0` selects which hook's
+  command list fires from `lefthook.yml`. The doctor invariant
+  `primary-checkout-commit-refuse-hook-installed` recognizes its fingerprint —
+  the marker comment `# livespec commit-refuse hook` + a `git rev-parse
+  --git-common-dir` invocation + an `exit 1` branch — via substring match.
 - `worktree-lib.sh` / `worktree-hydrate.sh` / `branch-protection.sh` —
   the Worktree Discipline Pack: the portable, pure-git worktree
   lifecycle core (create / hydrate / land / reap + primary-vs-linked
@@ -40,10 +42,13 @@ Rules an agent editing this tree must follow:
 - Keep these portable `#!/bin/sh` scripts; do NOT add bashisms or
   hard-code interpreter paths other than the mise/git invocations
   shown.
-- Do NOT weaken the refuse-at-primary branch in `git-hook-wrapper.sh`
+- Do NOT weaken the refuse-at-primary branch of the commit-refuse hook
   — its marker comment, the `git-dir` == `git-common-dir` comparison,
   and the `exit 1` branch together form the fingerprint the doctor
-  invariant matches.
+  invariant matches. That body is owned by the shared
+  `livespec_dev_tooling` package (the SINGLE source), not by this repo,
+  so any change to it happens upstream in that package — never by
+  re-vendoring a local copy here.
 - The task runner (`justfile`) is the single source of truth for
   dev-tooling invocations; hooks delegate via `lefthook` →
   `just <target>`, never by calling tools directly.
