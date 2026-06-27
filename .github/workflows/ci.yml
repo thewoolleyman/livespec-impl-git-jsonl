@@ -185,22 +185,6 @@ jobs:
           # the other metadata entries.
           fetch-depth: 0
 
-      # The shared livespec-dev-tooling commit-refuse-hook check
-      # enforces the canonical structural `.git/hooks/pre-commit` AND
-      # `.git/hooks/pre-push` body on the primary checkout per
-      # livespec/SPECIFICATION/non-functional-requirements.md
-      # §"Primary-checkout commit-refuse hook". The structural wrapper
-      # (refuse when `git rev-parse --git-dir` == `--git-common-dir`,
-      # armed on install) supersedes the legacy livespec.primaryPath
-      # mechanism. `actions/checkout` clones with empty hook bodies;
-      # install the structural git-hook-wrapper.sh at both paths so the
-      # invariant is satisfied for the CI run.
-      - name: Install commit-refuse hook (satisfy hook invariant)
-        if: matrix.target == 'check-primary-checkout-commit-refuse-hook-installed'
-        run: |
-          install -m 0755 dev-tooling/git-hook-wrapper.sh .git/hooks/pre-commit
-          install -m 0755 dev-tooling/git-hook-wrapper.sh .git/hooks/pre-push
-
       - name: Install pinned binaries via mise
         uses: jdx/mise-action@v2
 
@@ -213,6 +197,22 @@ jobs:
 
       - name: Install Python dev deps via uv
         run: uv sync --all-groups
+
+      # The shared livespec-dev-tooling commit-refuse-hook check enforces the
+      # canonical structural `.git/hooks/pre-commit` AND `.git/hooks/pre-push`
+      # body on the primary checkout per
+      # livespec/SPECIFICATION/non-functional-requirements.md
+      # §"Primary-checkout commit-refuse hook". `actions/checkout` clones with
+      # empty hook bodies; install the canonical body by REUSING the shared
+      # livespec-dev-tooling installer (NOT a vendored copy) so the invariant is
+      # satisfied for the CI run. Runs AFTER `uv sync` because the installer is a
+      # Python module from that package; delegates through `just` (the single
+      # invocation source of truth). The installed body is STRUCTURAL (refuse
+      # when `git rev-parse --git-dir` == `--git-common-dir`, armed on install)
+      # and supersedes the legacy livespec.primaryPath mechanism.
+      - name: Install commit-refuse hook (satisfy hook invariant)
+        if: matrix.target == 'check-primary-checkout-commit-refuse-hook-installed'
+        run: just install-commit-refuse-hooks
 
       - name: just ${{ matrix.target }}
         run: just ${{ matrix.target }}
