@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/thewoolleyman/livespec-orchestrator-git-jsonl/compare/v0.2.0...v0.3.0) (2026-06-29)
+
+
+### Features
+
+* migrate JSONL realization to the v013 lifecycle schema ([4f911c5](https://github.com/thewoolleyman/livespec-orchestrator-git-jsonl/commit/4f911c58625f42def1ca7a466eeee1a1ffda1283))
+
 ## [0.2.0](https://github.com/thewoolleyman/livespec-orchestrator-git-jsonl/compare/v0.1.0...v0.2.0) (2026-06-24)
 
 
