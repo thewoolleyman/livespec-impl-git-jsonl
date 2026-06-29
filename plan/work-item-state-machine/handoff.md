@@ -1,7 +1,14 @@
-# Handoff — work-item-state-machine (L1b, livespec-orchestrator-git-jsonl)
+# Handoff — work-item-state-machine (L1b, livespec-orchestrator-git-jsonl) — ✅ DONE
+
+> # ✅ L1b COMPLETE — released as **v0.3.0** (tag `4fd3c124`).
+> Epic `bd-gj-45liqm` is **CLOSED**; both children shipped. The whole L1b
+> slice landed: spec ratified to **v013** (PR #148), the atomic code
+> migration to the v0.5.0 lifecycle schema (PR #150), and the release
+> (PR #151). Nothing further is required on this thread; it is kept for
+> provenance (L0-precedent style). Detail in "State as of this handoff".
 
 **Thread:** `plan/work-item-state-machine/` · **Ledger anchor:** epic
-`bd-gj-45liqm` (`livespec-orchestrator-git-jsonl` beads tenant) ·
+`bd-gj-45liqm` (`livespec-orchestrator-git-jsonl` beads tenant; **CLOSED**) ·
 **Fleet anchor (prose ref):** `livespec-35s3zo` (livespec core tenant).
 
 > Status is **derived from the ledger**, never stored here. To read it:
@@ -31,23 +38,39 @@ each milestone.
 ## State as of this handoff
 
 - ✅ Epic `bd-gj-45liqm` anchored (prose-linked to `livespec-35s3zo`; no
-  typed cross-tenant `depends_on`).
-- ✅ Thread created; `00-l1b-overview.md` + this handoff committed.
-- ⏳ L0 dependency: livespec-runtime **v0.5.0** is RELEASED (tag
-  `dda6a40`) — the artifact this track re-vendors. Code is unblocked.
+  typed cross-tenant `depends_on`), now **CLOSED**.
+- ✅ Thread created; `00-l1b-overview.md` + `01-spec-delta.md` + this
+  handoff committed (PR #147).
+- ✅ **Spec gate** — `SPECIFICATION/contracts.md` ratified to **v013**
+  (propose-change → revise; PR #148): schema 16→**17** keys (`+rank`,
+  `−priority`), the 7-state `status` enum, terminal `closed→done`, `next`
+  ranks by `rank`. All `doctor-static` checks pass.
+- ✅ **Groom** — epic cut into 2 `ready` children: `bd-gj-ol5hmu` (code
+  migration) → `bd-gj-af4nsa` (release). Both **CLOSED** with
+  merge-evidence.
+- ✅ **Code** — re-vendor `livespec_runtime` v0.4.0 → **v0.5.0**
+  (`.vendor.jsonc` + `pyproject.toml` `[tool.uv.sources]` + `uv.lock`) +
+  the consumer migration, landed atomically (PR #150, merge `4f911c58`):
+  `store.py` 17 required-keys + `rank` + `BOTTOM_SENTINEL` adapter;
+  `commands/next.py` `_sort_key → (rank, id)`; the forced collateral
+  (`is_item_ready` `open→ready`; dep `done`; `list`/merge-evidence/
+  `beads_to_jsonl` `closed→done`); tests + fixtures re-authored. Committed
+  via the **green-verified leg** (`TDD-Suite-Green-*`); `just check` green
+  (50 targets, 100% coverage).
+- ✅ **Release** — **v0.3.0** cut (release-please PR #151; tag
+  `4fd3c1245da0bf5f5d4cacd8600c4b50e81cea4e`; GitHub Release published;
+  master green post-release). The artifact the L2 tenant migration
+  consumes.
 
-## Next action (ONE path)
+## Next action — NONE. ✅ L1b is COMPLETE.
 
-Re-vendor `livespec_runtime` v0.4.0 → v0.5.0 (`.vendor.jsonc` +
-`.claude-plugin/scripts/_vendor/livespec_runtime/` source tree + the
-verbatim-port pyproject gate exclusions + a `NOTICES` line), then run the
-L1b dogfooding order end-to-end per `research/00-l1b-overview.md`
-"The L1b slice": propose-change `SPECIFICATION/contracts.md` (schema
-16→17 keys: `+rank`, `−priority`; status-enum → the 7 states) → revise
-(auto-ratify) → groom (auto-cut the epic into ready children) →
-implement (red-green-replay: `store.py` required-keys + `rank` +
-bottom-sentinel adapter; `commands/next.py` `_sort_key` priority→rank;
-tests + golden-master + e2e-cli fixtures) → cut an L1b release.
+All steps (spec → code → release) shipped; epic `bd-gj-45liqm` is CLOSED;
+**v0.3.0** is released. Nothing remains on this thread.
+
+**Downstream (NOT this thread):** the L2 migration (all 9 beads tenants +
+the OpenBrain adopter) consumes this release; the fleet exit gate (delete
+`.claude/skills/overseer/` once dogfooded) lives on the core anchor
+`livespec-35s3zo`. The coordinator drives those.
 
 ## Discipline (non-negotiable)
 
