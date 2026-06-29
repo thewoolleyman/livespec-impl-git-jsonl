@@ -10,8 +10,9 @@ Filters:
 
 - `--filter=gap-tied` / `--filter=freeform` — origin filter
 - `--filter=blocked` — status == "blocked"
-- `--filter=ready` — status == "open" AND every depends_on item is closed
-- `--filter=closed` — status == "closed"
+- `--filter=ready` — status == "ready" AND every depends_on item is done
+- `--filter=closed` — the terminal status == "done" (the CLI token stays
+  `closed`; its predicate matches the renamed terminal state)
 - `--filter=all` (default)
 
 `--with-gap-id=<id>` filters to exact gap_id match (combinable with --filter).
@@ -124,7 +125,7 @@ def _filter_by_name(
         "freeform": lambda item, _ix: item.origin == "freeform",
         "blocked": lambda item, _ix: item.status == "blocked",
         "ready": lambda item, ix: is_item_ready(item=item, index=ix, manifest=manifest),
-        "closed": lambda item, _ix: item.status == "closed",
+        "closed": lambda item, _ix: item.status == "done",
     }
     predicate = predicates[name]
     return [item for item in materialized if predicate(item, index)]
@@ -141,10 +142,7 @@ def _write_human(*, items: list[WorkItem]) -> None:
         return
     for item in items:
         gap_marker = f" gap={item.gap_id}" if item.gap_id is not None else ""
-        line = (
-            f"{item.id}  [{item.status}/P{item.priority}/{item.origin}{gap_marker}]"
-            f"  {item.title}\n"
-        )
+        line = f"{item.id}  [{item.status}/{item.origin}{gap_marker}]  {item.title}\n"
         _ = sys.stdout.write(line)
 
 

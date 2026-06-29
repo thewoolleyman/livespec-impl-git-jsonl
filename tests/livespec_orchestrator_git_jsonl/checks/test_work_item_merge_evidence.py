@@ -76,7 +76,7 @@ def _work_item(
     *,
     id_: str = "li-aaa111",
     type_: WorkItemType = "task",
-    status: WorkItemStatus = "closed",
+    status: WorkItemStatus = "done",
     resolution: Resolution | None = "completed",
     audit: AuditRecord | None = None,
     depends_on: tuple[DependsOnRaw, ...] = (),
@@ -89,12 +89,12 @@ def _work_item(
         description="d",
         origin="freeform",
         gap_id=None,
-        priority=2,
+        rank="a1",
         assignee=None,
         depends_on=depends_on,
         captured_at="2026-06-12T00:00:00+00:00",
         resolution=resolution,
-        reason="r" if status == "closed" else None,
+        reason="r" if status == "done" else None,
         audit=audit,
         superseded_by=None,
     )
@@ -147,10 +147,8 @@ def test_main_skips_non_closed_items(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     path = tmp_path / "work-items.jsonl"
-    append_work_item(path=path, item=_work_item(status="open", resolution=None))
-    append_work_item(
-        path=path, item=_work_item(id_="li-aaa222", status="deferred", resolution=None)
-    )
+    append_work_item(path=path, item=_work_item(status="ready", resolution=None))
+    append_work_item(path=path, item=_work_item(id_="li-aaa222", status="backlog", resolution=None))
     rc = main(argv=[])
     captured = capsys.readouterr()
     assert rc == 0
@@ -283,17 +281,17 @@ def test_main_fails_on_closed_item_without_resolution(
     rc = main(argv=[])
     captured = capsys.readouterr()
     assert rc == 1
-    assert "closed work-item without resolution is malformed" in captured.out
+    assert "done work-item without resolution is malformed" in captured.out
 
 
-def test_main_fails_on_closed_epic_with_non_closed_child(
+def test_main_fails_on_done_epic_with_non_done_child(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.chdir(tmp_path)
     path = tmp_path / "work-items.jsonl"
-    append_work_item(path=path, item=_work_item(id_="li-chi111", status="open", resolution=None))
+    append_work_item(path=path, item=_work_item(id_="li-chi111", status="ready", resolution=None))
     append_work_item(
         path=path,
         item=_work_item(
@@ -306,7 +304,7 @@ def test_main_fails_on_closed_epic_with_non_closed_child(
     rc = main(argv=[])
     captured = capsys.readouterr()
     assert rc == 1
-    assert "closed epic has non-closed child 'li-chi111'" in captured.out
+    assert "done epic has non-done child 'li-chi111'" in captured.out
 
 
 def test_main_passes_on_closed_epic_with_closed_children(

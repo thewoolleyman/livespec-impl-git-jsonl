@@ -24,7 +24,7 @@ from livespec_runtime.cross_repo.types import (
 def _item(
     *,
     id_: str,
-    status: str = "open",
+    status: str = "ready",
     depends_on: tuple[object, ...] = (),
 ) -> WorkItem:
     return WorkItem(
@@ -35,7 +35,7 @@ def _item(
         description="d",
         origin="freeform",
         gap_id=None,
-        priority=2,
+        rank="a1",
         assignee=None,
         depends_on=depends_on,  # type: ignore[arg-type]
         captured_at="2026-05-19T00:00:00Z",
@@ -146,8 +146,8 @@ def test_is_item_ready_open_with_no_deps() -> None:
     assert is_item_ready(item=item, index={"li-x": item}, manifest=CrossRepoManifest(targets={}))
 
 
-def test_is_item_ready_closed_item_is_never_ready() -> None:
-    item = _item(id_="li-x", status="closed")
+def test_is_item_ready_done_item_is_never_ready() -> None:
+    item = _item(id_="li-x", status="done")
     assert not is_item_ready(
         item=item, index={"li-x": item}, manifest=CrossRepoManifest(targets={})
     )
@@ -160,8 +160,8 @@ def test_is_item_ready_open_local_dep_blocks() -> None:
     assert not is_item_ready(item=blocked, index=index, manifest=CrossRepoManifest(targets={}))
 
 
-def test_is_item_ready_closed_local_dep_does_not_block() -> None:
-    blocker = _item(id_="li-done", status="closed")
+def test_is_item_ready_done_local_dep_does_not_block() -> None:
+    blocker = _item(id_="li-done", status="done")
     blocked = _item(id_="li-ready", depends_on=("li-done",))
     index = {item.id: item for item in (blocker, blocked)}
     assert is_item_ready(item=blocked, index=index, manifest=CrossRepoManifest(targets={}))
@@ -177,8 +177,8 @@ def test_is_item_ready_typed_local_dep_blocks_when_open() -> None:
     assert not is_item_ready(item=blocked, index=index, manifest=CrossRepoManifest(targets={}))
 
 
-def test_is_item_ready_typed_local_dep_passes_when_closed() -> None:
-    blocker = _item(id_="li-done", status="closed")
+def test_is_item_ready_typed_local_dep_passes_when_done() -> None:
+    blocker = _item(id_="li-done", status="done")
     blocked = _item(
         id_="li-ready",
         depends_on=({"kind": "local", "work_item_id": "li-done"},),

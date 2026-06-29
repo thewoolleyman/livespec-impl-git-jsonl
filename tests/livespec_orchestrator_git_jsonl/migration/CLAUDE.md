@@ -5,8 +5,9 @@ Tests for the one-shot migration utilities under
 
 - `test_beads_to_jsonl.py` — covers `main()` and `translate_record`:
   asserts a beads issue record maps onto the `WorkItem` schema
-  correctly (id, type, status, priority, gap-id / resolution label
-  extraction, audit record), and that output is appended via the
+  correctly (id, type, status [7-state mapped], rank, gap-id /
+  resolution label extraction, audit record), and that output is
+  appended via the
   store's append-only path. Builds beads-shaped fixture dicts and a
   `tmp_path` output file.
 - `test_depends_on_typed_form.py` — covers the `blocked_by` →

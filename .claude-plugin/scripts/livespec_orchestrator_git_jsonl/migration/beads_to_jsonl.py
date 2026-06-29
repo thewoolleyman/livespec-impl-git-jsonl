@@ -24,13 +24,25 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from livespec_runtime.work_items.rank import key_between
+
 from livespec_orchestrator_git_jsonl.store import append_work_item
-from livespec_orchestrator_git_jsonl.types import AuditRecord, WorkItem
+from livespec_orchestrator_git_jsonl.types import AuditRecord, WorkItem, WorkItemStatus
 
 __all__: list[str] = ["main", "translate_record"]
 
 _GAP_ID_LABEL_PREFIX = "gap-id:"
 _RESOLUTION_LABEL_PREFIX = "resolution:"
+
+# Map the legacy beads built-in statuses onto the v013 livespec lifecycle
+# states. The 7-state names (and `blocked`, name-matched) pass through via
+# the `.get(raw, raw)` default. `deferred` is removed → `backlog`.
+_BEADS_STATUS_MAP: dict[str, WorkItemStatus] = {
+    "open": "ready",
+    "in_progress": "active",
+    "closed": "done",
+    "deferred": "backlog",
+}
 
 
 def main(*, argv: list[str] | None = None) -> int:
@@ -51,21 +63,35 @@ def main(*, argv: list[str] | None = None) -> int:
     beads_path = Path(args.beads_jsonl)
     out_path = Path(args.work_items_out)
     count = 0
+    # `priority` is gone in v013; `rank` is the sole ordering key. The
+    # converter assigns evenly-increasing fractional keys in file order by
+    # threading the previous key into `key_between`, so every migrated head
+    # carries a real (non-sentinel) rank and order is deterministic.
+    prev_rank: str | None = None
     for record in _iter_beads_records(path=beads_path):
-        work_item = translate_record(parsed=record)
+        rank = key_between(a=prev_rank, b=None)
+        work_item = translate_record(parsed=record, rank=rank)
         append_work_item(path=out_path, item=work_item)
+        prev_rank = rank
         count += 1
     _ = sys.stdout.write(f"migrated {count} beads issues → {out_path}\n")
     return 0
 
 
-def translate_record(*, parsed: dict[str, Any]) -> WorkItem:
-    """Map a single beads issue dict to a WorkItem dataclass."""
+def translate_record(*, parsed: dict[str, Any], rank: str = "a0") -> WorkItem:
+    """Map a single beads issue dict to a WorkItem dataclass.
+
+    `rank` is the v013 fractional ordering key (default `"a0"` — a valid
+    first key — for direct callers; `main` threads evenly-increasing keys
+    across the batch). The legacy beads `status` is mapped onto the
+    7-state lifecycle enum via `_BEADS_STATUS_MAP`.
+    """
     labels = list(parsed.get("labels", []))
     gap_id = _extract_label_value(labels=labels, prefix=_GAP_ID_LABEL_PREFIX)
     resolution_value = _extract_label_value(labels=labels, prefix=_RESOLUTION_LABEL_PREFIX)
     origin = "gap-tied" if gap_id is not None else "freeform"
-    status = parsed.get("status", "open")
+    raw_status = parsed.get("status", "open")
+    status = _BEADS_STATUS_MAP.get(raw_status, raw_status)
     return WorkItem(
         id=parsed["id"],
         type=parsed.get("issue_type", "task"),
@@ -74,12 +100,12 @@ def translate_record(*, parsed: dict[str, Any]) -> WorkItem:
         description=parsed.get("description", ""),
         origin=origin,
         gap_id=gap_id,
-        priority=int(parsed.get("priority", 2)),
+        rank=rank,
         assignee=parsed.get("assignee"),
         depends_on=(),
         captured_at=parsed.get("created_at", ""),
-        resolution=resolution_value if status == "closed" else None,  # type: ignore[arg-type]
-        reason=parsed.get("close_reason") if status == "closed" else None,
+        resolution=resolution_value if status == "done" else None,  # type: ignore[arg-type]
+        reason=parsed.get("close_reason") if status == "done" else None,
         audit=_extract_audit(parsed=parsed, status=status, gap_id=gap_id),
         superseded_by=None,
     )
@@ -110,7 +136,7 @@ def _extract_audit(
     status: str,
     gap_id: str | None,
 ) -> AuditRecord | None:
-    if status != "closed":
+    if status != "done":
         return None
     if gap_id is None:
         return None

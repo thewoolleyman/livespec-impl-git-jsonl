@@ -27,20 +27,19 @@ Algorithm:
 1. Load the cross-repo manifest from `<project-root>/.livespec.jsonc`
    (empty manifest when the file or `cross_repo_targets` block is
    absent).
-2. Identify ready items: status == "open" AND no `depends_on` entry
+2. Identify ready items: status == "ready" AND no `depends_on` entry
    resolves to `OPEN` via `resolve_ref`. Missing local references
    resolve to `UNKNOWN` and therefore do NOT exclude (the doctor's
    `no-orphan-dependency` invariant is the right surface for that).
-3. Score by:
-   a. priority (lower number = more urgent),
-   b. origin (gap-tied beats freeform at the same priority),
-   c. captured_at (oldest first),
-   d. id (lexicographic tiebreaker).
+3. Order by:
+   a. `rank` (the fractional/lexicographic key — the sole ordering
+      authority; `priority` was removed in v013),
+   b. id (lexicographic tiebreaker for identical ranks).
 4. Enumerate ALL ready items in ranked order as candidates.
 5. Apply `--offset` then `--limit` to produce the returned slice.
 6. Emit a `{candidates[], pagination}` envelope. Each candidate
    carries `action`, `reason`, `urgency`, and `work_item_ref`,
-   plus impl-git-jsonl-specific `priority` and `origin` fields
+   plus impl-git-jsonl-specific `rank` and `origin` fields
    (the cross-plugin contract permits additional fields).
 
 Empty `candidates[]` IS the no-work signal — the wrapper MUST NOT
@@ -118,10 +117,13 @@ def rank_candidates(
     - `action` — always `"implement"` (the only non-`none` action this
       ranker emits; `none` is signaled via an empty candidates list).
     - `work_item_ref` — the `id` of the ranked work-item.
-    - `urgency` — derived from `priority` (P0 → high; P1-P2 → medium;
-      P3+ → low).
+    - `urgency` — a uniform advisory `"medium"`. `priority` was removed
+      in v013 and `rank` is a pure ordering key (not a severity), so the
+      former priority-tier derivation is retired; the ranked ORDER (by
+      `rank`) is the dispatch signal. `urgency` stays an impl-git-jsonl
+      advisory field the cross-plugin contract does not prescribe.
     - `reason` — a one-line human narration.
-    - `priority` — the work-item's numeric priority (impl-git-jsonl
+    - `rank` — the work-item's fractional ordering key (impl-git-jsonl
       field; the cross-plugin contract permits additional fields).
     - `origin` — one of `"gap-tied"` or `"freeform"` (impl-git-jsonl
       field; the cross-plugin contract permits additional fields).
@@ -174,32 +176,25 @@ def _slice_envelope(
     }
 
 
+_ADVISORY_URGENCY = "medium"
+
+
 def _candidate_for(*, item: WorkItem) -> dict[str, Any]:
     return {
         "action": "implement",
         "work_item_ref": item.id,
-        "urgency": _urgency_for(priority=item.priority),
-        "reason": (f"ranked ready item (priority P{item.priority}, origin {item.origin})"),
-        "priority": item.priority,
+        "urgency": _ADVISORY_URGENCY,
+        "reason": (f"ranked ready item (rank {item.rank}, origin {item.origin})"),
+        "rank": item.rank,
         "origin": item.origin,
     }
 
 
-def _sort_key(item: WorkItem) -> tuple[int, int, str, str]:
-    origin_rank = 0 if item.origin == "gap-tied" else 1
-    return (item.priority, origin_rank, item.captured_at, item.id)
-
-
-_URGENCY_HIGH_THRESHOLD = 0
-_URGENCY_MEDIUM_THRESHOLD = 2
-
-
-def _urgency_for(*, priority: int) -> str:
-    if priority <= _URGENCY_HIGH_THRESHOLD:
-        return "high"
-    if priority <= _URGENCY_MEDIUM_THRESHOLD:
-        return "medium"
-    return "low"
+def _sort_key(item: WorkItem) -> tuple[str, str]:
+    # `rank` is the sole ordering authority (v013); `id` is the
+    # deterministic tie-break for identical ranks. The former
+    # priority/origin/captured_at heuristic is retired.
+    return (item.rank, item.id)
 
 
 def _parse_positive_int(*, raw: str, flag: str) -> int | None:

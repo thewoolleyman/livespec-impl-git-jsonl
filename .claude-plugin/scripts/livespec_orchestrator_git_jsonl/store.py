@@ -50,6 +50,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, get_args
 
+from livespec_runtime.work_items.rank import BOTTOM_SENTINEL
 from livespec_runtime.work_items.reduce import (
     materialize_work_items,
     reduce_work_item_heads,
@@ -82,7 +83,6 @@ _WORK_ITEM_REQUIRED_KEYS = frozenset(
         "description",
         "origin",
         "gap_id",
-        "priority",
         "assignee",
         "depends_on",
         "captured_at",
@@ -98,7 +98,16 @@ _WORK_ITEM_REQUIRED_KEYS = frozenset(
 # Read path treats absence as `None`; write path always serializes
 # (per livespec PC #4 sub-proposal 3 — `spec_commitment_hint` — and
 # the v008 append-only-store disciplines — `supersedes`).
-_WORK_ITEM_OPTIONAL_KEYS = frozenset({"spec_commitment_hint", "supersedes"})
+#
+# `rank` (the v013 lifecycle schema; livespec-runtime v0.5.0) is
+# required-on-WRITE (every WorkItem the store serializes carries it) but
+# optional-on-READ: a legacy line authored before `rank` reads back as the
+# shared bottom-sentinel `livespec_runtime.work_items.rank.BOTTOM_SENTINEL`
+# (the store-adapter substitution — NOT nullability in the domain type),
+# so it sits in the optional-presence set, not the required set. `priority`
+# was removed in v013 (`rank` is the sole ordering authority); it is NOT a
+# tolerated key — a record carrying it is a schema violation.
+_WORK_ITEM_OPTIONAL_KEYS = frozenset({"rank", "spec_commitment_hint", "supersedes"})
 
 _WORK_ITEM_ALLOWED_KEYS = _WORK_ITEM_REQUIRED_KEYS | _WORK_ITEM_OPTIONAL_KEYS
 
@@ -231,6 +240,12 @@ def _validate_work_item_payload(
         path=path,
         line_number=line_number,
         parsed=parsed,
+        key="rank",
+    )
+    _check_optional_string_key(
+        path=path,
+        line_number=line_number,
+        parsed=parsed,
         key="spec_commitment_hint",
     )
     _check_optional_string_key(
@@ -257,7 +272,10 @@ def _parse_work_item(*, path: Path, line_number: int, parsed: dict[str, Any]) ->
         description=parsed["description"],
         origin=parsed["origin"],
         gap_id=parsed["gap_id"],
-        priority=parsed["priority"],
+        # Absent OR null/empty `rank` (a legacy pre-v013 line) reads back as
+        # the shared bottom-sentinel; a present non-empty string is taken
+        # verbatim (its str-ness is enforced by `_validate_work_item_payload`).
+        rank=parsed.get("rank") or BOTTOM_SENTINEL,
         assignee=parsed["assignee"],
         depends_on=tuple(parsed["depends_on"]),
         captured_at=parsed["captured_at"],
@@ -400,6 +418,14 @@ def _check_in_enum(
 def _work_item_to_dict(*, item: WorkItem) -> dict[str, Any]:
     payload = asdict(item)
     payload["depends_on"] = list(item.depends_on)
+    # The abstract WorkItem (livespec-runtime v0.5.0) carries three policy
+    # fields this JSONL realization does NOT persist — admission_policy /
+    # acceptance_policy / blocked_reason govern the orchestrator
+    # Dispatcher/admission this plugin does not run (v013 schema = 17 keys).
+    # Drop them so a serialized record matches the closed-key schema and
+    # round-trips through the read-path validator.
+    for policy_key in ("admission_policy", "acceptance_policy", "blocked_reason"):
+        _ = payload.pop(policy_key, None)
     if item.audit is not None:
         payload["audit"] = {
             "verification_timestamp": item.audit.verification_timestamp,

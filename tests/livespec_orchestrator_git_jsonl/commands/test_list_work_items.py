@@ -12,11 +12,11 @@ from livespec_orchestrator_git_jsonl.types import AuditRecord, WorkItem
 def _item(
     *,
     id_: str,
-    status: str = "open",
+    status: str = "ready",
     origin: str = "freeform",
     gap_id: str | None = None,
     depends_on: tuple[str, ...] = (),
-    priority: int = 2,
+    rank: str = "a1",
     spec_commitment_hint: str | None = None,
 ) -> WorkItem:
     return WorkItem(
@@ -27,12 +27,12 @@ def _item(
         description="d",
         origin=origin,  # type: ignore[arg-type]
         gap_id=gap_id,
-        priority=priority,
+        rank=rank,
         assignee=None,
         depends_on=depends_on,
         captured_at="2026-05-19T00:00:00Z",
-        resolution="completed" if status == "closed" else None,
-        reason="done" if status == "closed" else None,
+        resolution="completed" if status == "done" else None,
+        reason="done" if status == "done" else None,
         audit=AuditRecord(
             verification_timestamp="2026-05-19T01:00:00Z",
             commits=("c",),
@@ -40,7 +40,7 @@ def _item(
             merge_sha="abc123",
             pr_number=None,
         )
-        if status == "closed"
+        if status == "done"
         else None,
         superseded_by=None,
         spec_commitment_hint=spec_commitment_hint,
@@ -167,7 +167,7 @@ def test_main_filter_ready_includes_closed_deps(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     path = tmp_path / "work-items.jsonl"
-    append_work_item(path=path, item=_item(id_="li-a", status="closed"))
+    append_work_item(path=path, item=_item(id_="li-a", status="done"))
     append_work_item(path=path, item=_item(id_="li-b", depends_on=("li-a",)))
     rc = main(argv=["--filter=ready"])
     captured = capsys.readouterr()
@@ -183,7 +183,7 @@ def test_main_filter_closed(
     monkeypatch.chdir(tmp_path)
     path = tmp_path / "work-items.jsonl"
     append_work_item(path=path, item=_item(id_="li-a"))
-    append_work_item(path=path, item=_item(id_="li-b", status="closed"))
+    append_work_item(path=path, item=_item(id_="li-b", status="done"))
     rc = main(argv=["--filter=closed"])
     captured = capsys.readouterr()
     assert "li-b" in captured.out
@@ -214,7 +214,7 @@ def test_main_json_output_with_audit(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     path = tmp_path / "work-items.jsonl"
-    append_work_item(path=path, item=_item(id_="li-a", status="closed"))
+    append_work_item(path=path, item=_item(id_="li-a", status="done"))
     rc = main(argv=["--json"])
     captured = capsys.readouterr()
     assert rc == 0
@@ -334,11 +334,11 @@ def test_main_with_spec_commitment_hint_filter_combines_with_filter_name(
     path = tmp_path / "work-items.jsonl"
     append_work_item(
         path=path,
-        item=_item(id_="li-open", status="open", spec_commitment_hint="topic-x"),
+        item=_item(id_="li-open", status="ready", spec_commitment_hint="topic-x"),
     )
     append_work_item(
         path=path,
-        item=_item(id_="li-closed", status="closed", spec_commitment_hint="topic-x"),
+        item=_item(id_="li-closed", status="done", spec_commitment_hint="topic-x"),
     )
     rc = main(argv=["--filter=closed", "--with-spec-commitment-hint", "topic-x"])
     captured = capsys.readouterr()

@@ -105,7 +105,7 @@ def main(*, argv: list[str] | None = None) -> int:
     else:
         for item_id in sorted(index):
             item = index[item_id]
-            if item.status != "closed":
+            if item.status != "done":
                 continue
             message = _item_violation(
                 repo_dir=repo_dir,
@@ -178,7 +178,7 @@ def _item_violation(
     if item.type == "epic":
         return _epic_violation(item=item, index=index)
     if item.resolution is None:
-        return "closed work-item without resolution is malformed"
+        return "done work-item without resolution is malformed"
     if item.resolution in _REQUIRE_EVIDENCE_RESOLUTIONS:
         return _evidence_violation(repo_dir=repo_dir, item=item, canonical_branch=canonical_branch)
     return _administrative_violation(item=item)
@@ -224,8 +224,8 @@ def _epic_violation(*, item: WorkItem, index: dict[str, WorkItem]) -> str | None
         if child_id is None:
             continue
         child = index.get(child_id)
-        if child is not None and child.status != "closed":
-            return f"closed epic has non-closed child '{child_id}'"
+        if child is not None and child.status != "done":
+            return f"done epic has non-done child '{child_id}'"
     return None
 
 

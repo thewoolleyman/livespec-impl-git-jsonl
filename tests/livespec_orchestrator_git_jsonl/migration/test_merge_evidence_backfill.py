@@ -99,7 +99,7 @@ def _merged_feature(*, root: Path) -> tuple[str, str]:
 def _raw_record(
     *,
     id_: str = "li-aaa111",
-    status: str = "closed",
+    status: str = "done",
     resolution: str | None = "completed",
     audit: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -111,7 +111,6 @@ def _raw_record(
         "description": "d",
         "origin": "freeform",
         "gap_id": None,
-        "priority": 2,
         "assignee": None,
         "depends_on": [],
         "captured_at": "2026-06-12T00:00:00+00:00",
@@ -142,7 +141,7 @@ def _work_item(
     *,
     id_: str = "li-aaa111",
     type_: WorkItemType = "task",
-    status: WorkItemStatus = "closed",
+    status: WorkItemStatus = "done",
     resolution: Resolution | None = "completed",
     audit: AuditRecord | None = None,
 ) -> WorkItem:
@@ -154,7 +153,7 @@ def _work_item(
         description="d",
         origin="freeform",
         gap_id=None,
-        priority=2,
+        rank="a1",
         assignee=None,
         depends_on=(),
         captured_at="2026-06-12T00:00:00+00:00",
@@ -364,7 +363,7 @@ def test_skips_stores_with_nothing_to_backfill(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     path = tmp_path / "wi.jsonl"
-    append_work_item(path=path, item=_work_item(status="open", resolution=None, audit=None))
+    append_work_item(path=path, item=_work_item(status="ready", resolution=None, audit=None))
     append_work_item(
         path=path,
         item=_work_item(id_="li-bbb222", resolution="wontfix", audit=None),
@@ -468,9 +467,15 @@ def test_module_is_invocable_as_a_script(tmp_path: Path) -> None:
         / "migration"
         / "merge_evidence_backfill.py"
     )
+    # The plugin package lives under `.claude-plugin/scripts`; the shared
+    # `livespec_runtime` it imports is vendored under `_vendor`. A direct
+    # module invocation bypasses the shebang wrappers' `_bootstrap`, so both
+    # roots must be on PYTHONPATH (the same two entries pytest's `pythonpath`
+    # config supplies during collection).
+    scripts_dir = module_path.parents[2]
     env = {
         "PATH": os.environ["PATH"],
-        "PYTHONPATH": str(module_path.parents[2]),
+        "PYTHONPATH": os.pathsep.join([str(scripts_dir), str(scripts_dir / "_vendor")]),
     }
     completed = subprocess.run(
         [sys.executable, str(module_path), "--path", str(tmp_path / "absent.jsonl")],

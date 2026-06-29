@@ -50,11 +50,21 @@ def test_translate_open_freeform_record() -> None:
     parsed = _beads_dict()
     item = translate_record(parsed=parsed)
     assert item.id == "li-aaa111"
-    assert item.status == "open"
+    assert item.status == "ready"
     assert item.origin == "freeform"
     assert item.gap_id is None
     assert item.resolution is None
     assert item.audit is None
+
+
+def test_translate_maps_in_progress_to_active() -> None:
+    item = translate_record(parsed=_beads_dict(status="in_progress"))
+    assert item.status == "active"
+
+
+def test_translate_maps_deferred_to_backlog() -> None:
+    item = translate_record(parsed=_beads_dict(status="deferred"))
+    assert item.status == "backlog"
 
 
 def test_translate_record_carries_assignee() -> None:
@@ -77,7 +87,7 @@ def test_translate_closed_with_resolution_label() -> None:
         close_reason="all green",
     )
     item = translate_record(parsed=parsed)
-    assert item.status == "closed"
+    assert item.status == "done"
     assert item.resolution == "completed"
     assert item.reason == "all green"
 

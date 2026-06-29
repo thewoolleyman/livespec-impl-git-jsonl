@@ -272,7 +272,7 @@ def _phase_two_transitions(
     orphans: list[str] = []
     for item_id in sorted(index):
         head = index[item_id]
-        if head.status != "closed" or head.type == "epic" or head.audit is not None:
+        if head.status != "done" or head.type == "epic" or head.audit is not None:
             continue
         if head.resolution not in _REQUIRE_EVIDENCE_RESOLUTIONS:
             continue

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from dataclasses import asdict
 from itertools import permutations
 from pathlib import Path
 from typing import Any
@@ -21,17 +22,19 @@ from livespec_orchestrator_git_jsonl.store import (
     work_item_record_identity,
 )
 from livespec_orchestrator_git_jsonl.types import AuditRecord, WorkItem
+from livespec_runtime.work_items.rank import BOTTOM_SENTINEL
 from livespec_runtime.work_items.store import WorkItemStore
 
 
 def _minimal_work_item(
     *,
     id_: str = "li-aaa111",
-    status: str = "open",
+    status: str = "ready",
     resolution: str | None = None,
     audit: AuditRecord | None = None,
     captured_at: str = "2026-05-19T00:00:00Z",
     supersedes: str | None = None,
+    rank: str = "a1",
 ) -> WorkItem:
     return WorkItem(
         id=id_,
@@ -41,7 +44,7 @@ def _minimal_work_item(
         description="d",
         origin="freeform",
         gap_id=None,
-        priority=2,
+        rank=rank,
         assignee=None,
         depends_on=(),
         captured_at=captured_at,
@@ -76,7 +79,7 @@ def test_append_work_item_with_audit_roundtrips(tmp_path: Path) -> None:
         files_changed=("a.py",),
         merge_sha="abc123",
     )
-    item = _minimal_work_item(id_="li-zzz999", status="closed", resolution="completed", audit=audit)
+    item = _minimal_work_item(id_="li-zzz999", status="done", resolution="completed", audit=audit)
     append_work_item(path=path, item=item)
     [read_back] = list(read_work_items(path=path))
     assert read_back == item
@@ -165,7 +168,7 @@ def test_read_work_items_bad_enum_origin_raises(tmp_path: Path) -> None:
 
 def test_read_work_items_bad_enum_resolution_raises(tmp_path: Path) -> None:
     path = tmp_path / "work-items.jsonl"
-    item = _minimal_work_item(status="closed", resolution="completed")
+    item = _minimal_work_item(status="done", resolution="completed")
     append_work_item(path=path, item=item)
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload["resolution"] = "not-a-real-resolution"
@@ -180,12 +183,11 @@ def test_read_work_items_audit_missing_keys_raises(tmp_path: Path) -> None:
     payload = {
         "id": "li-x",
         "type": "task",
-        "status": "closed",
+        "status": "done",
         "title": "t",
         "description": "d",
         "origin": "freeform",
         "gap_id": None,
-        "priority": 2,
         "assignee": None,
         "depends_on": [],
         "captured_at": "2026-05-19T00:00:00Z",
@@ -203,10 +205,10 @@ def test_read_work_items_audit_missing_keys_raises(tmp_path: Path) -> None:
 def test_materialize_work_items_supersession_head_wins(tmp_path: Path) -> None:
     """The chain head wins even when it physically precedes the record it amends."""
     path = tmp_path / "work-items.jsonl"
-    first = _minimal_work_item(id_="li-a", status="open")
+    first = _minimal_work_item(id_="li-a", status="ready")
     second = _minimal_work_item(
         id_="li-a",
-        status="closed",
+        status="done",
         resolution="completed",
         supersedes=work_item_record_identity(item=first),
     )
@@ -215,8 +217,8 @@ def test_materialize_work_items_supersession_head_wins(tmp_path: Path) -> None:
     append_work_item(path=path, item=first)
     append_work_item(path=path, item=other)
     materialized = materialize_work_items(records=read_work_items(path=path))
-    assert materialized["li-a"].status == "closed"
-    assert materialized["li-b"].status == "open"
+    assert materialized["li-a"].status == "done"
+    assert materialized["li-b"].status == "ready"
 
 
 def test_append_creates_parent_directory(tmp_path: Path) -> None:
@@ -240,12 +242,12 @@ def test_append_work_item_rejects_bad_enum_type(tmp_path: Path) -> None:
     item = WorkItem(
         id="li-aaa222",
         type="not-a-real-type",  # type: ignore[arg-type]
-        status="open",
+        status="ready",
         title="t",
         description="d",
         origin="freeform",
         gap_id=None,
-        priority=2,
+        rank="a1",
         assignee=None,
         depends_on=(),
         captured_at="2026-05-19T00:00:00Z",
@@ -264,12 +266,12 @@ def test_append_work_item_rejects_bad_enum_origin(tmp_path: Path) -> None:
     item = WorkItem(
         id="li-aaa333",
         type="task",
-        status="open",
+        status="ready",
         title="t",
         description="d",
         origin="not-a-real-origin",  # type: ignore[arg-type]
         gap_id=None,
-        priority=2,
+        rank="a1",
         assignee=None,
         depends_on=(),
         captured_at="2026-05-19T00:00:00Z",
@@ -285,7 +287,7 @@ def test_append_work_item_rejects_bad_enum_origin(tmp_path: Path) -> None:
 
 def test_append_work_item_rejects_bad_enum_resolution(tmp_path: Path) -> None:
     path = tmp_path / "work-items.jsonl"
-    bad = _minimal_work_item(status="closed", resolution="not-a-real-resolution")
+    bad = _minimal_work_item(status="done", resolution="not-a-real-resolution")
     with pytest.raises(SchemaViolationError) as excinfo:
         append_work_item(path=path, item=bad)
     assert "resolution" in excinfo.value.detail
@@ -314,12 +316,12 @@ def test_append_work_item_with_spec_commitment_hint_roundtrips(tmp_path: Path) -
     item = WorkItem(
         id="li-hint01",
         type="task",
-        status="open",
+        status="ready",
         title="t",
         description="d",
         origin="freeform",
         gap_id=None,
-        priority=2,
+        rank="a1",
         assignee=None,
         depends_on=(),
         captured_at="2026-05-19T00:00:00Z",
@@ -357,12 +359,11 @@ def test_read_legacy_work_item_without_field_defaults_to_none(tmp_path: Path) ->
     legacy_payload = {
         "id": "li-legacy",
         "type": "task",
-        "status": "open",
+        "status": "ready",
         "title": "legacy",
         "description": "from before the field landed",
         "origin": "freeform",
         "gap_id": None,
-        "priority": 2,
         "assignee": None,
         "depends_on": [],
         "captured_at": "2026-05-19T00:00:00Z",
@@ -395,12 +396,12 @@ def test_append_work_item_rejects_non_string_hint(tmp_path: Path) -> None:
     bad = WorkItem(
         id="li-badhint",
         type="task",
-        status="open",
+        status="ready",
         title="t",
         description="d",
         origin="freeform",
         gap_id=None,
-        priority=2,
+        rank="a1",
         assignee=None,
         depends_on=(),
         captured_at="2026-05-19T00:00:00Z",
@@ -428,6 +429,123 @@ def test_read_work_item_still_rejects_unexpected_extra_keys(tmp_path: Path) -> N
     assert "unexpected extra keys" in excinfo.value.detail
 
 
+# -- rank field (v013 lifecycle schema; livespec-runtime v0.5.0) ---------
+
+
+def test_read_legacy_work_item_without_rank_defaults_to_bottom_sentinel(tmp_path: Path) -> None:
+    """A pre-v013 line lacking `rank` reads back as the bottom-sentinel.
+
+    `rank` is optional-on-read: a legacy line authored before the ordering
+    key landed materializes with `rank == BOTTOM_SENTINEL` ("~"), the
+    store-adapter substitution that sorts strictly after every real key.
+    """
+    path = tmp_path / "work-items.jsonl"
+    legacy_payload = {
+        "id": "li-norank",
+        "type": "task",
+        "status": "ready",
+        "title": "legacy",
+        "description": "from before rank landed",
+        "origin": "freeform",
+        "gap_id": None,
+        "assignee": None,
+        "depends_on": [],
+        "captured_at": "2026-05-19T00:00:00Z",
+        "resolution": None,
+        "reason": None,
+        "audit": None,
+        "superseded_by": None,
+    }
+    _ = path.write_text(json.dumps(legacy_payload) + "\n", encoding="utf-8")
+    [read_back] = list(read_work_items(path=path))
+    assert read_back.rank == BOTTOM_SENTINEL
+    assert read_back.rank == "~"
+
+
+def test_read_work_item_with_rank_roundtrips(tmp_path: Path) -> None:
+    """A present non-empty `rank` is taken verbatim and round-trips losslessly."""
+    path = tmp_path / "work-items.jsonl"
+    item = _minimal_work_item(rank="a3")
+    append_work_item(path=path, item=item)
+    [read_back] = list(read_work_items(path=path))
+    assert read_back.rank == "a3"
+    assert read_back == item
+
+
+def test_read_work_item_with_empty_rank_defaults_to_bottom_sentinel(tmp_path: Path) -> None:
+    """A present-but-empty `rank` string is treated as absent (bottom-sentinel)."""
+    path = tmp_path / "work-items.jsonl"
+    append_work_item(path=path, item=_minimal_work_item())
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["rank"] = ""
+    _ = path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    [read_back] = list(read_work_items(path=path))
+    assert read_back.rank == BOTTOM_SENTINEL
+
+
+def test_read_work_item_with_priority_key_raises(tmp_path: Path) -> None:
+    """`priority` was removed in v013; a line carrying it is a schema violation."""
+    path = tmp_path / "work-items.jsonl"
+    append_work_item(path=path, item=_minimal_work_item())
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["priority"] = 2
+    _ = path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    with pytest.raises(SchemaViolationError) as excinfo:
+        list(read_work_items(path=path))
+    assert "unexpected extra keys" in excinfo.value.detail
+    assert "priority" in excinfo.value.detail
+
+
+def test_read_work_item_with_non_string_rank_raises(tmp_path: Path) -> None:
+    """A present non-string `rank` value fires SchemaViolationError."""
+    path = tmp_path / "work-items.jsonl"
+    append_work_item(path=path, item=_minimal_work_item())
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["rank"] = 7
+    _ = path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    with pytest.raises(SchemaViolationError) as excinfo:
+        list(read_work_items(path=path))
+    assert "rank" in excinfo.value.detail
+
+
+def test_append_work_item_serializes_exactly_seventeen_keys(tmp_path: Path) -> None:
+    """The write path emits exactly the 17 schema keys — no policy fields, no priority.
+
+    The abstract WorkItem's `admission_policy` / `acceptance_policy` /
+    `blocked_reason` policy fields are DROPPED on write (this JSONL
+    realization does not persist them); `priority` is gone (replaced by
+    `rank`). The serialized line carries the 14 required keys + `rank`
+    + `spec_commitment_hint` + `supersedes`.
+    """
+    path = tmp_path / "work-items.jsonl"
+    append_work_item(path=path, item=_minimal_work_item())
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert set(payload.keys()) == {
+        "id",
+        "type",
+        "status",
+        "title",
+        "description",
+        "origin",
+        "gap_id",
+        "assignee",
+        "depends_on",
+        "captured_at",
+        "resolution",
+        "reason",
+        "audit",
+        "superseded_by",
+        "rank",
+        "spec_commitment_hint",
+        "supersedes",
+    }
+    assert len(payload) == 17
+    assert "priority" not in payload
+    assert "admission_policy" not in payload
+    assert "acceptance_policy" not in payload
+    assert "blocked_reason" not in payload
+
+
 # -- audit merge-evidence fields (li-tenpup; contracts.md "Work-items
 #    JSONL record schema" -> audit.merge_sha + audit.pr_number) ----------
 
@@ -452,12 +570,11 @@ def _closed_payload_with_audit(*, audit: dict[str, Any] | None) -> dict[str, Any
     return {
         "id": "li-merge1",
         "type": "task",
-        "status": "closed",
+        "status": "done",
         "title": "t",
         "description": "d",
         "origin": "freeform",
         "gap_id": None,
-        "priority": 2,
         "assignee": None,
         "depends_on": [],
         "captured_at": "2026-05-19T00:00:00Z",
@@ -505,7 +622,7 @@ def test_append_work_item_with_merge_evidence_roundtrips(tmp_path: Path) -> None
     )
     item = _minimal_work_item(
         id_="li-merge9",
-        status="closed",
+        status="done",
         resolution="completed",
         audit=audit,
     )
@@ -529,7 +646,7 @@ def test_append_work_item_serializes_merge_evidence_keys(tmp_path: Path) -> None
     )
     item = _minimal_work_item(
         id_="li-merge8",
-        status="closed",
+        status="done",
         resolution="completed",
         audit=audit,
     )
@@ -614,16 +731,16 @@ def _sha256_identity_of(*, canonical: str) -> str:
 
 
 def test_work_item_default_supersedes_is_none() -> None:
-    """WorkItem defaults the sixteenth key to None (an original record)."""
+    """WorkItem defaults the supersedes pointer to None (an original record)."""
     item = WorkItem(
         id="li-orig01",
         type="task",
-        status="open",
+        status="ready",
         title="t",
         description="d",
         origin="freeform",
         gap_id=None,
-        priority=2,
+        rank="a1",
         assignee=None,
         depends_on=(),
         captured_at="2026-05-19T00:00:00Z",
@@ -650,7 +767,7 @@ def test_append_work_item_with_supersedes_roundtrips(tmp_path: Path) -> None:
     original = _minimal_work_item(id_="li-amend1")
     amendment = _minimal_work_item(
         id_="li-amend1",
-        status="in_progress",
+        status="active",
         captured_at="2026-05-19T01:00:00Z",
         supersedes=work_item_record_identity(item=original),
     )
@@ -667,12 +784,11 @@ def test_read_legacy_work_item_without_supersedes_defaults_to_none(tmp_path: Pat
     legacy_payload = {
         "id": "li-legacy2",
         "type": "task",
-        "status": "open",
+        "status": "ready",
         "title": "legacy",
         "description": "from before supersedes landed",
         "origin": "freeform",
         "gap_id": None,
-        "priority": 2,
         "assignee": None,
         "depends_on": [],
         "captured_at": "2026-05-19T00:00:00Z",
@@ -708,37 +824,41 @@ def test_append_work_item_rejects_non_string_supersedes(tmp_path: Path) -> None:
     assert "supersedes" in excinfo.value.detail
 
 
-def test_work_item_record_identity_is_sha256_of_canonical_line(tmp_path: Path) -> None:
-    """The fixed identity encoding: sha256 over the canonical line bytes.
+def test_work_item_record_identity_is_sha256_of_canonical_serialization() -> None:
+    """The fixed identity encoding: sha256 over the canonical record serialization.
 
-    The append path writes the canonical serialization (every schema key
-    explicit, sorted keys, compact separators), so a record's identity is
-    exactly the sha256 of its own line, sans trailing newline.
+    The shared identity hashes the FULL dataclass serialization (every
+    field explicit, sorted keys, compact separators) — including the
+    abstract WorkItem's `admission_policy` / `acceptance_policy` /
+    `blocked_reason` policy fields, which this JSONL realization does NOT
+    persist on the line. So the identity is a pure function of record
+    content, independent of which keys the on-disk line happens to carry.
     """
-    path = tmp_path / "work-items.jsonl"
     item = _minimal_work_item()
-    append_work_item(path=path, item=item)
-    line = path.read_text(encoding="utf-8").rstrip("\n")
-    assert work_item_record_identity(item=item) == _sha256_identity_of(canonical=line)
+    payload = asdict(item)
+    payload["depends_on"] = list(item.depends_on)
+    canonical = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    assert work_item_record_identity(item=item) == _sha256_identity_of(canonical=canonical)
 
 
 def test_work_item_record_identity_normalizes_legacy_records(tmp_path: Path) -> None:
-    """A legacy record's identity is computed over its normalized form.
+    """A legacy record's identity matches an explicit-defaults record.
 
-    Records on disk that pre-date the optional keys hash as if those keys
-    were explicit nulls, so identity stays a pure function of record
-    content regardless of which schema era serialized it.
+    Records on disk that pre-date the optional keys (`rank`,
+    `spec_commitment_hint`, `supersedes`) read back with
+    `rank == BOTTOM_SENTINEL` and the other optional fields `None`, so
+    identity stays a pure function of record content regardless of which
+    schema era serialized the line.
     """
     path = tmp_path / "work-items.jsonl"
     legacy_payload = {
         "id": "li-legacy3",
         "type": "task",
-        "status": "open",
+        "status": "ready",
         "title": "legacy",
         "description": "pre-optional-keys record",
         "origin": "freeform",
         "gap_id": None,
-        "priority": 2,
         "assignee": None,
         "depends_on": [],
         "captured_at": "2026-05-19T00:00:00Z",
@@ -749,11 +869,25 @@ def test_work_item_record_identity_normalizes_legacy_records(tmp_path: Path) -> 
     }
     _ = path.write_text(json.dumps(legacy_payload) + "\n", encoding="utf-8")
     [read_back] = list(read_work_items(path=path))
-    normalized = dict(legacy_payload)
-    normalized["spec_commitment_hint"] = None
-    normalized["supersedes"] = None
-    canonical = json.dumps(normalized, separators=(",", ":"), sort_keys=True)
-    assert work_item_record_identity(item=read_back) == _sha256_identity_of(canonical=canonical)
+    assert read_back.rank == BOTTOM_SENTINEL
+    explicit = WorkItem(
+        id="li-legacy3",
+        type="task",
+        status="ready",
+        title="legacy",
+        description="pre-optional-keys record",
+        origin="freeform",
+        gap_id=None,
+        rank=BOTTOM_SENTINEL,
+        assignee=None,
+        depends_on=(),
+        captured_at="2026-05-19T00:00:00Z",
+        resolution=None,
+        reason=None,
+        audit=None,
+        superseded_by=None,
+    )
+    assert work_item_record_identity(item=read_back) == work_item_record_identity(item=explicit)
 
 
 def test_record_identity_covers_the_supersedes_pointer() -> None:
@@ -779,10 +913,10 @@ def test_materialize_work_items_is_order_independent(tmp_path: Path) -> None:
     head. This retires the DEPRECATED "latest record by file order
     wins" reduction.
     """
-    a = _minimal_work_item(id_="li-chain2", status="open")
+    a = _minimal_work_item(id_="li-chain2", status="ready")
     b = _minimal_work_item(
         id_="li-chain2",
-        status="in_progress",
+        status="active",
         supersedes=work_item_record_identity(item=a),
     )
     c = _minimal_work_item(
@@ -800,10 +934,10 @@ def test_materialize_work_items_is_order_independent(tmp_path: Path) -> None:
 
 def test_materialize_work_items_divergence_tie_breaks_on_captured_at(tmp_path: Path) -> None:
     """Divergent heads materialize to the latest-captured record."""
-    earlier = _minimal_work_item(id_="li-div1", status="open")
+    earlier = _minimal_work_item(id_="li-div1", status="ready")
     later = _minimal_work_item(
         id_="li-div1",
-        status="in_progress",
+        status="active",
         captured_at="2026-05-19T02:00:00Z",
     )
     for index, ordering in enumerate(permutations((earlier, later))):
@@ -815,8 +949,8 @@ def test_materialize_work_items_divergence_tie_breaks_on_captured_at(tmp_path: P
 
 def test_materialize_work_items_divergence_tie_breaks_on_identity(tmp_path: Path) -> None:
     """Equal captured_at falls through to the per-record identity tie-break."""
-    one = _minimal_work_item(id_="li-div2", status="open")
-    two = _minimal_work_item(id_="li-div2", status="in_progress")
+    one = _minimal_work_item(id_="li-div2", status="ready")
+    two = _minimal_work_item(id_="li-div2", status="active")
     ranked = sorted((work_item_record_identity(item=record), record) for record in (one, two))
     expected = ranked[-1][1]
     for index, ordering in enumerate(permutations((one, two))):
@@ -834,10 +968,10 @@ def test_reduce_work_item_heads_surfaces_divergence(tmp_path: Path) -> None:
     chain-free entity reduces to its single head.
     """
     path = tmp_path / "work-items.jsonl"
-    base = _minimal_work_item(id_="li-div3", status="open")
+    base = _minimal_work_item(id_="li-div3", status="ready")
     left = _minimal_work_item(
         id_="li-div3",
-        status="in_progress",
+        status="active",
         captured_at="2026-05-19T01:00:00Z",
         supersedes=work_item_record_identity(item=base),
     )
