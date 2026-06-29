@@ -34,6 +34,9 @@ each milestone.
    cross-repo design of record + the L0 worked example).
 2. `research/01-spec-delta.md` — the drafted `contracts.md` delta (the
    propose-change payload, human-readable).
+3. `research/02-l2-tenant-migration.md` — the L2 tenant migration record
+   (this repo's beads tenant: 5 custom statuses registered + `rank`
+   backfilled via the beads-fabro `rebalance-ranks` legacy-seed). **DONE.**
 
 ## State as of this handoff
 
@@ -67,10 +70,12 @@ each milestone.
 All steps (spec → code → release) shipped; epic `bd-gj-45liqm` is CLOSED;
 **v0.3.0** is released. Nothing remains on this thread.
 
-**Downstream (NOT this thread):** the L2 migration (all 9 beads tenants +
-the OpenBrain adopter) consumes this release; the fleet exit gate (delete
-`.claude/skills/overseer/` once dogfooded) lives on the core anchor
-`livespec-35s3zo`. The coordinator drives those.
+**L2 — THIS repo's tenant is MIGRATED** (`research/02-l2-tenant-migration.md`):
+the 5 custom lifecycle statuses are registered and every item carries a
+real `rank` (legacy-seeded `priority → captured_at → id`). The other 8
+tenants (7 remaining fleet + OpenBrain) migrate in the same lockstep, and
+the fleet exit gate (delete `.claude/skills/overseer/` once dogfooded)
+lives on the core anchor `livespec-35s3zo` — the coordinator drives those.
 
 ## Discipline (non-negotiable)
 
