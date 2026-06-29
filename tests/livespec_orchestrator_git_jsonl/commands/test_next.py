@@ -23,10 +23,10 @@ from livespec_orchestrator_git_jsonl.types import WorkItem
 def _item(
     *,
     id_: str,
-    priority: int = 2,
+    rank: str = "a1",
     origin: str = "freeform",
     captured_at: str = "2026-05-19T00:00:00Z",
-    status: str = "open",
+    status: str = "ready",
     depends_on: tuple[str, ...] = (),
 ) -> WorkItem:
     return WorkItem(
@@ -37,7 +37,7 @@ def _item(
         description="d",
         origin=origin,  # type: ignore[arg-type]
         gap_id="G1" if origin == "gap-tied" else None,
-        priority=priority,
+        rank=rank,
         assignee=None,
         depends_on=depends_on,
         captured_at=captured_at,
@@ -57,34 +57,39 @@ def test_rank_candidates_no_items_returns_empty_list() -> None:
     assert rank_candidates(items=[]) == []
 
 
-def test_rank_candidates_picks_highest_priority_first() -> None:
-    items = [_item(id_="li-a", priority=3), _item(id_="li-b", priority=1)]
+def test_rank_candidates_orders_by_rank() -> None:
+    # rank is the sole ordering authority (v013); "a1" < "a3" lexicographically.
+    items = [_item(id_="li-a", rank="a3"), _item(id_="li-b", rank="a1")]
     result = rank_candidates(items=items)
     assert [c["work_item_ref"] for c in result] == ["li-b", "li-a"]
 
 
-def test_rank_candidates_gap_tied_beats_freeform_at_same_priority() -> None:
+def test_rank_candidates_origin_does_not_affect_order_at_same_rank() -> None:
+    # origin is no longer an ordering signal (priority/origin heuristic retired);
+    # identical rank falls through to the id tiebreak.
     items = [
-        _item(id_="li-a", priority=2, origin="freeform"),
-        _item(id_="li-b", priority=2, origin="gap-tied"),
+        _item(id_="li-b", rank="a1", origin="freeform"),
+        _item(id_="li-a", rank="a1", origin="gap-tied"),
     ]
     result = rank_candidates(items=items)
-    assert [c["work_item_ref"] for c in result] == ["li-b", "li-a"]
+    assert [c["work_item_ref"] for c in result] == ["li-a", "li-b"]
 
 
-def test_rank_candidates_oldest_first_at_same_priority_origin() -> None:
+def test_rank_candidates_captured_at_does_not_affect_order() -> None:
+    # captured_at is no longer an ordering signal; identical rank → id tiebreak.
     items = [
-        _item(id_="li-newer", priority=2, captured_at="2026-05-19T02:00:00Z"),
-        _item(id_="li-older", priority=2, captured_at="2026-05-19T01:00:00Z"),
+        _item(id_="li-newer", rank="a1", captured_at="2026-05-19T02:00:00Z"),
+        _item(id_="li-older", rank="a1", captured_at="2026-05-19T01:00:00Z"),
     ]
     result = rank_candidates(items=items)
-    assert [c["work_item_ref"] for c in result] == ["li-older", "li-newer"]
+    assert [c["work_item_ref"] for c in result] == ["li-newer", "li-older"]
 
 
 def test_rank_candidates_id_tiebreaker() -> None:
+    # A tie on rank is broken deterministically by id.
     items = [
-        _item(id_="li-zzz", priority=2, captured_at="t"),
-        _item(id_="li-aaa", priority=2, captured_at="t"),
+        _item(id_="li-zzz", rank="a1"),
+        _item(id_="li-aaa", rank="a1"),
     ]
     result = rank_candidates(items=items)
     assert [c["work_item_ref"] for c in result] == ["li-aaa", "li-zzz"]
@@ -96,8 +101,8 @@ def test_rank_candidates_excludes_blocked_status() -> None:
     assert [c["work_item_ref"] for c in result] == ["li-b"]
 
 
-def test_rank_candidates_excludes_closed_status() -> None:
-    items = [_item(id_="li-a", status="closed"), _item(id_="li-b")]
+def test_rank_candidates_excludes_done_status() -> None:
+    items = [_item(id_="li-a", status="done"), _item(id_="li-b")]
     result = rank_candidates(items=items)
     assert [c["work_item_ref"] for c in result] == ["li-b"]
 
@@ -111,9 +116,9 @@ def test_rank_candidates_unresolved_dependency_excludes_item() -> None:
     assert [c["work_item_ref"] for c in result] == ["li-blocker"]
 
 
-def test_rank_candidates_closed_dependency_unblocks_item() -> None:
+def test_rank_candidates_done_dependency_unblocks_item() -> None:
     items = [
-        _item(id_="li-done", status="closed"),
+        _item(id_="li-done", status="done"),
         _item(id_="li-ready", depends_on=("li-done",)),
     ]
     result = rank_candidates(items=items)
@@ -128,33 +133,25 @@ def test_rank_candidates_missing_local_dependency_does_not_exclude() -> None:
 
 
 def test_rank_candidates_carries_required_envelope_fields() -> None:
-    items = [_item(id_="li-x", priority=0, origin="gap-tied")]
+    items = [_item(id_="li-x", rank="a0", origin="gap-tied")]
     candidates = rank_candidates(items=items)
     assert len(candidates) == 1
     candidate = candidates[0]
     assert candidate["action"] == "implement"
     assert candidate["work_item_ref"] == "li-x"
-    assert candidate["urgency"] == "high"
-    assert isinstance(candidate["reason"], str)
-    assert candidate["reason"]
+    assert candidate["urgency"] == "medium"
+    assert candidate["reason"] == "ranked ready item (rank a0, origin gap-tied)"
     # impl-git-jsonl-specific fields MAY ride along (contract permits)
-    assert candidate["priority"] == 0
+    assert candidate["rank"] == "a0"
     assert candidate["origin"] == "gap-tied"
 
 
-def test_rank_candidates_urgency_high_for_p0() -> None:
-    items = [_item(id_="li-x", priority=0)]
-    assert rank_candidates(items=items)[0]["urgency"] == "high"
-
-
-def test_rank_candidates_urgency_medium_for_p2() -> None:
-    items = [_item(id_="li-x", priority=2)]
-    assert rank_candidates(items=items)[0]["urgency"] == "medium"
-
-
-def test_rank_candidates_urgency_low_for_p4() -> None:
-    items = [_item(id_="li-x", priority=4)]
-    assert rank_candidates(items=items)[0]["urgency"] == "low"
+def test_rank_candidates_urgency_is_always_medium() -> None:
+    # `priority` was removed in v013; urgency is a uniform advisory "medium"
+    # for every candidate (the ranked ORDER carries the dispatch signal).
+    items = [_item(id_="li-x", rank="a0"), _item(id_="li-y", rank="a9")]
+    urgencies = {c["urgency"] for c in rank_candidates(items=items)}
+    assert urgencies == {"medium"}
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +168,7 @@ def test_build_envelope_no_items_emits_empty_candidates_with_pagination() -> Non
 
 
 def test_build_envelope_applies_limit() -> None:
-    items = [_item(id_=f"li-{i:02d}", priority=i) for i in range(10)]
+    items = [_item(id_=f"li-{i:02d}", rank=f"a{i}") for i in range(10)]
     envelope = build_envelope(items=items, offset=0, limit=3)
     candidates = envelope["candidates"]
     assert isinstance(candidates, list)
@@ -181,11 +178,11 @@ def test_build_envelope_applies_limit() -> None:
 
 
 def test_build_envelope_applies_offset() -> None:
-    items = [_item(id_=f"li-{i:02d}", priority=i) for i in range(5)]
+    items = [_item(id_=f"li-{i:02d}", rank=f"a{i}") for i in range(5)]
     envelope = build_envelope(items=items, offset=2, limit=2)
     candidates = envelope["candidates"]
     assert isinstance(candidates, list)
-    # priority order p0..p4 → offset 2 skips li-00, li-01 → emits li-02, li-03
+    # rank order a0..a4 → offset 2 skips li-00, li-01 → emits li-02, li-03
     assert [c["work_item_ref"] for c in candidates] == ["li-02", "li-03"]
     assert envelope["pagination"] == {
         "offset": 2,
@@ -196,7 +193,7 @@ def test_build_envelope_applies_offset() -> None:
 
 
 def test_build_envelope_has_more_false_when_slice_reaches_end() -> None:
-    items = [_item(id_=f"li-{i:02d}", priority=i) for i in range(3)]
+    items = [_item(id_=f"li-{i:02d}", rank=f"a{i}") for i in range(3)]
     envelope = build_envelope(items=items, offset=0, limit=5)
     pagination = envelope["pagination"]
     assert pagination == {"offset": 0, "limit": 5, "total": 3, "has_more": False}
@@ -299,7 +296,7 @@ def test_main_limit_applied_in_json(
     monkeypatch.chdir(tmp_path)
     path = tmp_path / "work-items.jsonl"
     for i in range(7):
-        append_work_item(path=path, item=_item(id_=f"li-{i:02d}", priority=i))
+        append_work_item(path=path, item=_item(id_=f"li-{i:02d}", rank=f"a{i}"))
     rc = main(argv=["--json", "--limit", "3"])
     captured = capsys.readouterr()
     assert rc == 0
@@ -318,7 +315,7 @@ def test_main_offset_applied_in_json(
     monkeypatch.chdir(tmp_path)
     path = tmp_path / "work-items.jsonl"
     for i in range(5):
-        append_work_item(path=path, item=_item(id_=f"li-{i:02d}", priority=i))
+        append_work_item(path=path, item=_item(id_=f"li-{i:02d}", rank=f"a{i}"))
     rc = main(argv=["--json", "--offset", "2", "--limit", "2"])
     captured = capsys.readouterr()
     assert rc == 0

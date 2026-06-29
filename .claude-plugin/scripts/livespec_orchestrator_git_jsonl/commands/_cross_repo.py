@@ -16,8 +16,8 @@ entry and treat `OPEN` as a blocking state. This module bundles:
   authoritative typed-form conversion.
 - `is_item_ready(item, *, index, manifest)` — predicate consumed by
   the next ranker and the list-work-items "ready" filter. An item is
-  ready iff its status is "open" AND no typed `depends_on` entry
-  resolves to `OPEN` via `resolve_ref`.
+  ready iff its status is "ready" (the v013 lifecycle state) AND no
+  typed `depends_on` entry resolves to `OPEN` via `resolve_ref`.
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ def _local_lookup_for(*, index: dict[str, WorkItem]) -> Callable[[str], RefStatu
     return lambda work_item_id: (
         RefStatus.UNKNOWN
         if work_item_id not in index
-        else (RefStatus.CLOSED if index[work_item_id].status == "closed" else RefStatus.OPEN)
+        else (RefStatus.CLOSED if index[work_item_id].status == "done" else RefStatus.OPEN)
     )
 
 
@@ -140,7 +140,7 @@ def is_item_ready(
     they signify the dependency has cleared (or its state can't be
     determined, which the doctor invariants surface separately).
     """
-    if item.status != "open":
+    if item.status != "ready":
         return False
     return not any(
         _entry_blocks(raw=raw, index=index, manifest=manifest) for raw in item.depends_on
