@@ -508,14 +508,15 @@ def test_read_work_item_with_non_string_rank_raises(tmp_path: Path) -> None:
     assert "rank" in excinfo.value.detail
 
 
-def test_append_work_item_serializes_exactly_seventeen_keys(tmp_path: Path) -> None:
-    """The write path emits exactly the 17 schema keys — no policy fields, no priority.
+def test_append_work_item_serializes_exactly_nineteen_keys(tmp_path: Path) -> None:
+    """The write path emits exactly the 19 schema keys — no policy fields, no priority.
 
     The abstract WorkItem's `admission_policy` / `acceptance_policy` /
     `blocked_reason` policy fields are DROPPED on write (this JSONL
     realization does not persist them); `priority` is gone (replaced by
     `rank`). The serialized line carries the 14 required keys + `rank`
-    + `spec_commitment_hint` + `supersedes`.
+    + `spec_commitment_hint` + `supersedes` + `acceptance_criteria`
+    + `notes`.
     """
     path = tmp_path / "work-items.jsonl"
     append_work_item(path=path, item=_minimal_work_item())
@@ -538,12 +539,122 @@ def test_append_work_item_serializes_exactly_seventeen_keys(tmp_path: Path) -> N
         "rank",
         "spec_commitment_hint",
         "supersedes",
+        "acceptance_criteria",
+        "notes",
     }
-    assert len(payload) == 17
+    assert len(payload) == 19
     assert "priority" not in payload
     assert "admission_policy" not in payload
     assert "acceptance_policy" not in payload
     assert "blocked_reason" not in payload
+
+
+# -- acceptance_criteria + notes fields (bd-gj-lxr; runtime v0.8.0) ------
+
+
+def test_work_item_defaults_acceptance_criteria_and_notes_to_none() -> None:
+    """WorkItem dataclass defaults both new optional fields to None."""
+    item = _minimal_work_item()
+    assert item.acceptance_criteria is None
+    assert item.notes is None
+
+
+def test_append_work_item_with_acceptance_criteria_and_notes_roundtrips(
+    tmp_path: Path,
+) -> None:
+    """A work-item carrying acceptance_criteria + notes round-trips losslessly."""
+    path = tmp_path / "work-items.jsonl"
+    item = WorkItem(
+        id="li-acc001",
+        type="task",
+        status="ready",
+        title="t",
+        description="d",
+        origin="freeform",
+        gap_id=None,
+        rank="a1",
+        assignee=None,
+        depends_on=(),
+        captured_at="2026-05-19T00:00:00Z",
+        resolution=None,
+        reason=None,
+        audit=None,
+        superseded_by=None,
+        acceptance_criteria="the gate is green and the feature works",
+        notes="groomed 2026-07-02; split from the epic",
+    )
+    append_work_item(path=path, item=item)
+    [read_back] = list(read_work_items(path=path))
+    assert read_back == item
+    assert read_back.acceptance_criteria == "the gate is green and the feature works"
+    assert read_back.notes == "groomed 2026-07-02; split from the epic"
+
+
+def test_append_work_item_without_acceptance_criteria_and_notes_writes_null(
+    tmp_path: Path,
+) -> None:
+    """Write path always serializes both fields (explicit null on omission)."""
+    path = tmp_path / "work-items.jsonl"
+    append_work_item(path=path, item=_minimal_work_item())
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["acceptance_criteria"] is None
+    assert payload["notes"] is None
+
+
+def test_read_legacy_work_item_without_acceptance_criteria_and_notes_defaults_none(
+    tmp_path: Path,
+) -> None:
+    """Legacy records lacking the two fields read back as None (no violation)."""
+    path = tmp_path / "work-items.jsonl"
+    legacy_payload = {
+        "id": "li-legacy2",
+        "type": "task",
+        "status": "ready",
+        "title": "legacy",
+        "description": "from before the fields landed",
+        "origin": "freeform",
+        "gap_id": None,
+        "rank": "a1",
+        "assignee": None,
+        "depends_on": [],
+        "captured_at": "2026-05-19T00:00:00Z",
+        "resolution": None,
+        "reason": None,
+        "audit": None,
+        "superseded_by": None,
+        "spec_commitment_hint": None,
+        "supersedes": None,
+    }
+    _ = path.write_text(json.dumps(legacy_payload) + "\n", encoding="utf-8")
+    [read_back] = list(read_work_items(path=path))
+    assert read_back.acceptance_criteria is None
+    assert read_back.notes is None
+
+
+def test_read_work_item_with_non_string_acceptance_criteria_raises(
+    tmp_path: Path,
+) -> None:
+    """A present non-string acceptance_criteria fires SchemaViolationError."""
+    path = tmp_path / "work-items.jsonl"
+    append_work_item(path=path, item=_minimal_work_item())
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["acceptance_criteria"] = 7
+    _ = path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    with pytest.raises(SchemaViolationError) as excinfo:
+        list(read_work_items(path=path))
+    assert "acceptance_criteria" in excinfo.value.detail
+
+
+def test_read_work_item_with_non_string_notes_raises(tmp_path: Path) -> None:
+    """A present non-string notes fires SchemaViolationError."""
+    path = tmp_path / "work-items.jsonl"
+    append_work_item(path=path, item=_minimal_work_item())
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["notes"] = ["not", "a", "string"]
+    _ = path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    with pytest.raises(SchemaViolationError) as excinfo:
+        list(read_work_items(path=path))
+    assert "notes" in excinfo.value.detail
 
 
 # -- audit merge-evidence fields (li-tenpup; contracts.md "Work-items

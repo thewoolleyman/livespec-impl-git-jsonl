@@ -107,7 +107,9 @@ _WORK_ITEM_REQUIRED_KEYS = frozenset(
 # so it sits in the optional-presence set, not the required set. `priority`
 # was removed in v013 (`rank` is the sole ordering authority); it is NOT a
 # tolerated key — a record carrying it is a schema violation.
-_WORK_ITEM_OPTIONAL_KEYS = frozenset({"rank", "spec_commitment_hint", "supersedes"})
+_WORK_ITEM_OPTIONAL_KEYS = frozenset(
+    {"rank", "spec_commitment_hint", "supersedes", "acceptance_criteria", "notes"}
+)
 
 _WORK_ITEM_ALLOWED_KEYS = _WORK_ITEM_REQUIRED_KEYS | _WORK_ITEM_OPTIONAL_KEYS
 
@@ -254,6 +256,18 @@ def _validate_work_item_payload(
         parsed=parsed,
         key="supersedes",
     )
+    _check_optional_string_key(
+        path=path,
+        line_number=line_number,
+        parsed=parsed,
+        key="acceptance_criteria",
+    )
+    _check_optional_string_key(
+        path=path,
+        line_number=line_number,
+        parsed=parsed,
+        key="notes",
+    )
 
 
 def _parse_work_item(*, path: Path, line_number: int, parsed: dict[str, Any]) -> WorkItem:
@@ -285,6 +299,8 @@ def _parse_work_item(*, path: Path, line_number: int, parsed: dict[str, Any]) ->
         superseded_by=parsed["superseded_by"],
         spec_commitment_hint=parsed.get("spec_commitment_hint"),
         supersedes=parsed.get("supersedes"),
+        acceptance_criteria=parsed.get("acceptance_criteria"),
+        notes=parsed.get("notes"),
     )
 
 
@@ -418,10 +434,11 @@ def _check_in_enum(
 def _work_item_to_dict(*, item: WorkItem) -> dict[str, Any]:
     payload = asdict(item)
     payload["depends_on"] = list(item.depends_on)
-    # The abstract WorkItem (livespec-runtime v0.5.0) carries three policy
+    # The abstract WorkItem (livespec-runtime v0.8.0) carries three policy
     # fields this JSONL realization does NOT persist — admission_policy /
     # acceptance_policy / blocked_reason govern the orchestrator
-    # Dispatcher/admission this plugin does not run (v013 schema = 17 keys).
+    # Dispatcher/admission this plugin does not run (the nineteen-key record
+    # schema carries none of these three policy fields).
     # Drop them so a serialized record matches the closed-key schema and
     # round-trips through the read-path validator.
     for policy_key in ("admission_policy", "acceptance_policy", "blocked_reason"):
